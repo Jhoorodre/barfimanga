@@ -3,7 +3,7 @@ package hosts
 import (
 	"context"
 
-	"manga-upload/internal/models"
+	"barfimanga/internal/models"
 )
 
 // Host define a interface que todos os provedores de hospedagem devem implementar.

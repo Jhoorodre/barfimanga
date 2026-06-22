@@ -1,11 +1,12 @@
-module manga-upload
+module barfimanga
 
-go 1.25.0
+go 1.18
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/huh v1.0.0
 	github.com/mattn/go-isatty v0.0.20
+	golang.org/x/image v0.40.0
 	golang.org/x/term v0.42.0
 	golang.org/x/text v0.37.0
 	golang.org/x/time v0.15.0
@@ -37,6 +38,5 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/image v0.40.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 )

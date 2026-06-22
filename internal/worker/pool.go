@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
-	"manga-upload/internal/cache"
-	"manga-upload/internal/hosts"
-	"manga-upload/internal/models"
-	"manga-upload/internal/progress"
+	"barfimanga/internal/cache"
+	"barfimanga/internal/hosts"
+	"barfimanga/internal/models"
+	"barfimanga/internal/progress"
 )
 
 // Pool gerencia o upload paralelo de arquivos com controle de taxa de requisições.

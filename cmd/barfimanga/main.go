@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"syscall"
 
-	"manga-upload/internal/config"
-	"manga-upload/internal/core"
-	"manga-upload/internal/tui"
+	"barfimanga/internal/config"
+	"barfimanga/internal/core"
+	"barfimanga/internal/tui"
 )
 
 type cliOptions struct {
@@ -36,7 +36,7 @@ type cliOptions struct {
 
 func parseFlags(args []string) (*cliOptions, error) {
 	opts := &cliOptions{}
-	fs := flag.NewFlagSet("manga-upload", flag.ContinueOnError)
+	fs := flag.NewFlagSet("barfimanga", flag.ContinueOnError)
 
 	// Custom Usage
 	fs.Usage = func() {

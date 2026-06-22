@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"manga-upload/internal/config"
+	"barfimanga/internal/config"
 )
 
 type Client struct {

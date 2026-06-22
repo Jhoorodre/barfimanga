@@ -11,8 +11,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"manga-upload/internal/config"
-	"manga-upload/internal/models"
+	"barfimanga/internal/config"
+	"barfimanga/internal/models"
 )
 
 type GofileHost struct {

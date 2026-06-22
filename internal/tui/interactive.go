@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/charmbracelet/huh"
-	"manga-upload/internal/config"
-	"manga-upload/internal/utils"
+	"barfimanga/internal/config"
+	"barfimanga/internal/utils"
 )
 
 // RunInteractive inicia a interface de usuário no terminal (TUI).
@@ -18,7 +18,7 @@ func RunInteractive(mCfg *config.MultiConfig) (string, string, string, bool, boo
 		form := huh.NewForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().
-					Title(fmt.Sprintf("Manga Upload - Menu Principal (Perfil: %s)", mCfg.ActiveProfile)).
+					Title(fmt.Sprintf("BarfiManga - Menu Principal (Perfil: %s)", mCfg.ActiveProfile)).
 					Options(
 						huh.NewOption("Fazer Upload de Obra Salva", "library_upload"),
 						huh.NewOption("Upload Rápido (Sem salvar)", "quick_upload"),

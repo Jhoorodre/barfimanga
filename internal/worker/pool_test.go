@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"manga-upload/internal/models"
-	"manga-upload/internal/progress"
-	"manga-upload/internal/worker"
+	"barfimanga/internal/models"
+	"barfimanga/internal/progress"
+	"barfimanga/internal/worker"
 )
 
 // mockHost is a dummy implementation of hosts.Host for testing purposes

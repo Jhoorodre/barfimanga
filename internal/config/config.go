@@ -58,7 +58,7 @@ func ConfigDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "manga-upload"), nil
+	return filepath.Join(home, ".config", "barfimanga"), nil
 }
 
 // LoadConfig carrega as configurações do arquivo JSON.

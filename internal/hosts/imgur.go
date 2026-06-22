@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"manga-upload/internal/config"
-	"manga-upload/internal/models"
+	"barfimanga/internal/config"
+	"barfimanga/internal/models"
 )
 
 type ImgurHost struct {

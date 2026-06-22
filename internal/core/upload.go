@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"manga-upload/internal/cache"
-	"manga-upload/internal/config"
-	"manga-upload/internal/github"
-	"manga-upload/internal/hosts"
-	"manga-upload/internal/models"
-	"manga-upload/internal/progress"
-	"manga-upload/internal/utils"
-	"manga-upload/internal/worker"
+	"barfimanga/internal/cache"
+	"barfimanga/internal/config"
+	"barfimanga/internal/github"
+	"barfimanga/internal/hosts"
+	"barfimanga/internal/models"
+	"barfimanga/internal/progress"
+	"barfimanga/internal/utils"
+	"barfimanga/internal/worker"
 )
 
 // Pipeline orquestra a lógica principal de scanning, upload e envio ao github.

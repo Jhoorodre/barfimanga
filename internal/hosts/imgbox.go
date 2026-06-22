@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"manga-upload/internal/config"
-	"manga-upload/internal/models"
+	"barfimanga/internal/config"
+	"barfimanga/internal/models"
 
 	"golang.org/x/image/webp"
 )

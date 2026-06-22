@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"manga-upload/internal/models"
+	"barfimanga/internal/models"
 )
 
 // LoadJSON tenta carregar um reader.json do disco.
