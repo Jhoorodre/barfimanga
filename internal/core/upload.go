@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -331,6 +332,30 @@ func (p *Pipeline) uploadToGitHub(ctx context.Context, jsonPath, jsonFilename, e
 		fmt.Println(">> Metadados sincronizados com Sucesso!")
 	}
 	logPipeline("SUCESSO GitHub Sync")
+
+	// --- GERADOR DE LINKS CUBARI ---
+	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/%s", p.active.GitHubRepo, remotePath)
+	encodedURL := base64.URLEncoding.EncodeToString([]byte(rawURL))
+	cubariURL := fmt.Sprintf("https://cubari.moe/read/gist/%s/", encodedURL)
+
+	linkInfo := fmt.Sprintf("\n==============================\n"+
+		"Nome: %s\nID do JSON: %s\n"+
+		"Link Raw GitHub: %s\n"+
+		"Link Cubari: %s\n"+
+		"==============================\n",
+		mangaTitle, jsonFilename, rawURL, cubariURL)
+
+	if !quiet {
+		fmt.Println(linkInfo)
+	}
+
+	linksFile := filepath.Join("bd", "cubari_links.txt")
+	f, err := os.OpenFile(linksFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		f.WriteString(linkInfo)
+		f.Close()
+	}
+
 	return nil
 }
 

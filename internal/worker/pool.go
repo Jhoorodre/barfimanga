@@ -95,8 +95,8 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 					var uploadRes models.UploadResult
 					var uploadErr error
 
-					// Retry logic
-					maxRetries := 3
+					// Retry logic agressivo para lidar com falhas de ActiveModel do backend Ruby (ImgBox)
+					maxRetries := 8
 					for attempt := 1; attempt <= maxRetries; attempt++ {
 						uploadRes, uploadErr = p.host.UploadImage(ctx, j.filepath)
 						if uploadErr == nil && uploadRes.Success {
@@ -104,9 +104,9 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 						}
 
 						if attempt < maxRetries {
-							// Exponetial backoff: 1s, 2s, 4s...
-							backoffStr := 1 << (attempt - 1)
-							time.Sleep(time.Duration(backoffStr) * time.Second)
+							// Exponential backoff mais conservador: 2s, 4s, 8s, 16s, 32s...
+							backoffTime := 1 << attempt
+							time.Sleep(time.Duration(backoffTime) * time.Second)
 						}
 					}
 
