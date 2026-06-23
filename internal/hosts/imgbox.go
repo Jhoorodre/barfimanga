@@ -181,7 +181,7 @@ func (h *ImgboxHost) UploadImage(ctx context.Context, filePath string) (models.U
 		if len(result.Files) > 0 && result.Files[0].Error != "" {
 			errMsg = result.Files[0].Error
 		}
-		return models.UploadResult{Filename: filepath.Base(filePath), Success: false, Error: errMsg}, fmt.Errorf(errMsg)
+		return models.UploadResult{Filename: filepath.Base(filePath), Success: false, Error: errMsg}, fmt.Errorf("%s", errMsg)
 	}
 
 	return models.UploadResult{

@@ -90,3 +90,5 @@ Desktop.ini
 reader.json
 
 manga-upload.bat
+bd/*
+!bd/.gitkeep

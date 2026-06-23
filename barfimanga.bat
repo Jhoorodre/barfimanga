@@ -6,7 +6,7 @@ set "WSL_PROJECT_DIR=/home/jhonnatta/projetos/BarfiManga"
 set "WSL_BIN=./bin/barfimanga"
 
 echo ========================================
-echo        MANGA UPLOAD CLI (WSL)
+echo             BARFIMANGA (WSL)
 echo ========================================
 
 :: Verifica se o usuario arrastou uma pasta para o .bat

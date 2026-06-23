@@ -5,102 +5,132 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+
+	"github.com/joho/godotenv"
 )
 
 // MangaEntry representa uma obra salva na biblioteca.
 type MangaEntry struct {
-	Name         string `json:"name"`          // Nome de exibição
-	LocalPath    string `json:"local_path"`    // Caminho no PC (Windows ou Linux)
-	MetadataPath string `json:"metadata_path"` // Onde salvar JSON e DBs locais
-	MangaID      string `json:"manga_id"`      // ID usado no JSON
-	GitHubFolder string `json:"github_folder"` // Pasta no GitHub
-	Description  string `json:"description"`
-	Artist       string `json:"artist"`
-	Author       string `json:"author"`
-	Cover        string `json:"cover"`
-	Status       string `json:"status"`
+	Name             string `json:"name"`
+	LocalPath        string `json:"local_path"`
+	MetadataPath     string `json:"metadata_path"`
+	AutoMoveMetadata bool   `json:"auto_move_metadata"`
+	MangaID          string `json:"manga_id"`
+	GitHubFolder     string `json:"github_folder"`
+	Description      string `json:"description"`
+	Artist           string `json:"artist"`
+	Author           string `json:"author"`
+	Cover            string `json:"cover"`
+	Status           string `json:"status"`
 }
 
 // Config representa as configurações de um perfil individual.
 type Config struct {
-	GitHubToken  string                `json:"github_token,omitempty"`
-	GitHubRepo   string                `json:"github_repo,omitempty"` // format: owner/repo
-	GitHubBranch string                `json:"github_branch,omitempty"`
-	ScanGroup    string                `json:"scan_group,omitempty"`   // e.g. "Default" or "MyScan"
-	DefaultHost  string                `json:"default_host,omitempty"` // e.g. "catbox"
-	HostToken    string                `json:"host_token,omitempty"`   // e.g. userhash for catbox
-	Workers      int                   `json:"workers,omitempty"`
-	RateLimit    float64               `json:"rate_limit,omitempty"`
-	Library      map[string]MangaEntry `json:"library,omitempty"`
+	GitHubTokenEnv string                `json:"github_token_env,omitempty"` // Qual var do .env usar
+	GitHubToken    string                `json:"-"` // Mantido em memória (lido dinamicamente do .env)
+	GitHubRepo     string                `json:"github_repo,omitempty"` // owner/repo
+	GitHubBranch   string                `json:"github_branch,omitempty"`
+	ScanGroup      string                `json:"scan_group,omitempty"`
+	DefaultHost    string                `json:"default_host,omitempty"`
+	HostToken      string                `json:"host_token,omitempty"`
+	Workers        int                   `json:"workers,omitempty"`
+	RateLimit      float64               `json:"rate_limit,omitempty"`
+	Library        map[string]MangaEntry `json:"-"` // Mantido na memória (mas salvo no bd/library.json)
 }
 
-// MultiConfig representa o arquivo de configuração completo com perfis.
+// MultiConfig representa o arquivo de configuração completo com perfis (memory).
 type MultiConfig struct {
 	ActiveProfile string            `json:"active_profile"`
 	Profiles      map[string]Config `json:"profiles"`
 }
 
-// GetDefaultConfig retorna as configurações padrão.
+// LibraryData é o modelo para salvar separadamente as obras por perfil no bd/library.json
+type LibraryData struct {
+	Profiles map[string]map[string]MangaEntry `json:"profiles"`
+}
+
 func GetDefaultConfig() Config {
 	return Config{
-		GitHubBranch: "main",
-		ScanGroup:    "Default",
-		DefaultHost:  "catbox",
-		Workers:      5,
-		RateLimit:    1.0,
-		Library:      make(map[string]MangaEntry),
+		GitHubBranch:   "main",
+		ScanGroup:      "Default",
+		DefaultHost:    "catbox",
+		Workers:        5,
+		RateLimit:      1.0,
+		GitHubTokenEnv: "PAT_DEFAULT", // Por padrão procura no .env
+		Library:        make(map[string]MangaEntry),
 	}
 }
 
-// ConfigDir retorna o diretório onde o arquivo de configuração é armazenado.
 func ConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
+	// Usar o diretório do projeto /bd
+	cwd, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "/home/jhonnatta/projetos/BarfiManga/bd", nil
 	}
-	return filepath.Join(home, ".config", "barfimanga"), nil
+	return filepath.Join(cwd, "bd"), nil
 }
 
-// LoadConfig carrega as configurações do arquivo JSON.
 func LoadConfig() (MultiConfig, error) {
+	// Carrega .env se existir, ignora erro se não existir
+	_ = godotenv.Load()
+
 	dir, err := ConfigDir()
 	if err != nil {
 		return MultiConfig{}, err
 	}
-	path := filepath.Join(dir, "config.json")
+	
+	// Garante que a pasta bd/ exista
+	os.MkdirAll(dir, 0700)
 
-	data, err := os.ReadFile(path)
+	profilesPath := filepath.Join(dir, "profiles.json")
+	libraryPath := filepath.Join(dir, "library.json")
+
+	var mCfg MultiConfig
+	dataProfiles, err := os.ReadFile(profilesPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// Cria configuração padrão se não existir
-			mCfg := MultiConfig{
+			mCfg = MultiConfig{
 				ActiveProfile: "default",
 				Profiles: map[string]Config{
 					"default": GetDefaultConfig(),
 				},
 			}
-			err = SaveConfig(mCfg)
-			return mCfg, err
+			SaveConfig(mCfg)
+		} else {
+			return MultiConfig{}, err
 		}
-		return MultiConfig{}, err
+	} else {
+		if err := json.Unmarshal(dataProfiles, &mCfg); err != nil {
+			return MultiConfig{}, err
+		}
 	}
 
-	var mCfg MultiConfig
-	if err := json.Unmarshal(data, &mCfg); err != nil {
-		return MultiConfig{}, err
-	}
-
-	// Fallbacks de segurança para evitar pânicos
 	if mCfg.Profiles == nil {
 		mCfg.Profiles = make(map[string]Config)
 	}
-	
-	// Garante que o map Library exista em todos os perfis
+
+	var libData LibraryData
+	dataLibrary, err := os.ReadFile(libraryPath)
+	if err == nil {
+		_ = json.Unmarshal(dataLibrary, &libData)
+	}
+	if libData.Profiles == nil {
+		libData.Profiles = make(map[string]map[string]MangaEntry)
+	}
+
 	for name, prof := range mCfg.Profiles {
-		if prof.Library == nil {
+		// Puxa a biblioteca do library.json e anexa ao perfil em memória
+		if lib, ok := libData.Profiles[name]; ok {
+			prof.Library = lib
+		} else {
 			prof.Library = make(map[string]MangaEntry)
-			mCfg.Profiles[name] = prof
 		}
+
+		// Puxa o PAT do .env baseado na string referenciada no JSON
+		if prof.GitHubTokenEnv != "" {
+			prof.GitHubToken = os.Getenv(prof.GitHubTokenEnv)
+		}
+		mCfg.Profiles[name] = prof
 	}
 
 	if mCfg.ActiveProfile == "" {
@@ -113,27 +143,40 @@ func LoadConfig() (MultiConfig, error) {
 	return mCfg, nil
 }
 
-// SaveConfig salva as configurações no arquivo JSON.
 func SaveConfig(mCfg MultiConfig) error {
 	dir, err := ConfigDir()
 	if err != nil {
 		return err
 	}
+	os.MkdirAll(dir, 0700)
 
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
+	// 1. Extrair Library para salvar no library.json
+	libData := LibraryData{
+		Profiles: make(map[string]map[string]MangaEntry),
+	}
+	for name, prof := range mCfg.Profiles {
+		libData.Profiles[name] = prof.Library
 	}
 
-	path := filepath.Join(dir, "config.json")
-	data, err := json.MarshalIndent(mCfg, "", "  ")
+	// 2. Salva profiles.json (O struct ignora GitHubToken e Library automaticamente)
+	pathProfiles := filepath.Join(dir, "profiles.json")
+	pData, err := json.MarshalIndent(mCfg, "", "  ")
 	if err != nil {
 		return err
 	}
+	if err := os.WriteFile(pathProfiles, pData, 0600); err != nil {
+		return err
+	}
 
-	return os.WriteFile(path, data, 0600)
+	// 3. Salva library.json
+	pathLibrary := filepath.Join(dir, "library.json")
+	lData, err := json.MarshalIndent(libData, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(pathLibrary, lData, 0600)
 }
 
-// GetActive retorna o perfil de configuração ativo no momento.
 func (m *MultiConfig) GetActive() Config {
 	if cfg, ok := m.Profiles[m.ActiveProfile]; ok {
 		return cfg

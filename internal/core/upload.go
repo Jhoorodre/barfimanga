@@ -18,6 +18,22 @@ import (
 	"barfimanga/internal/worker"
 )
 
+// logPipeline grava eventos no arquivo bd/pipeline.log
+func logPipeline(msg string) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	logPath := filepath.Join(dir, "bd", "pipeline.log")
+	os.MkdirAll(filepath.Dir(logPath), 0755)
+	
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		defer f.Close()
+		f.WriteString(time.Now().Format("2006-01-02 15:04:05") + " - " + msg + "\n")
+	}
+}
+
 // Pipeline orquestra a lógica principal de scanning, upload e envio ao github.
 type Pipeline struct {
 	mCfg   config.MultiConfig
@@ -67,6 +83,8 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 	mangaTitle := filepath.Base(dir)
 	mangaRoot := dir
 
+	logPipeline(fmt.Sprintf("INICIANDO PIPELINE: Obra '%s' | Dir: %s | SyncOnly: %v", mangaTitle, dir, syncOnly))
+
 	// 2. Escaneia sub-diretórios (capítulos) - Pula se for apenas Sync
 	var chapters []string
 	hasSubDirs := false
@@ -113,8 +131,8 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 	// Define onde os DBs e o JSON serão salvos
 	dbRoot := mangaRoot
 	if entry.MetadataPath != "" {
-		// Converte caminho Windows para WSL e adiciona subpasta com o Nome da Obra (mangaTitle)
-		safeDirName := utils.SanitizeFilename(mangaTitle, false)
+		folderName := filepath.Base(dir)
+		safeDirName := utils.SanitizeFilename(folderName, false)
 		dbRoot = filepath.Join(utils.ToWSLPath(entry.MetadataPath), safeDirName)
 		if err := os.MkdirAll(dbRoot, 0755); err != nil {
 			return fmt.Errorf("erro ao criar diretório de metadados: %v", err)
@@ -138,6 +156,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 	// Se for APENAS Sync, atualiza metadados do cabeçalho e sobe pro GitHub
 	if syncOnly {
+		logPipeline(fmt.Sprintf("[Fast-Sync] Atualizando metadados de '%s'", mangaTitle))
 		if !quiet {
 			fmt.Printf(">> [Fast-Sync] Atualizando apenas metadados de '%s'...\n", mangaTitle)
 		}
@@ -213,6 +232,13 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		results, err := pool.ProcessImages(ctx, images, tracker, uploadCache, forceRebuild)
 		progUI.Finish(err == nil)
 
+		if ctx.Err() != nil {
+			fmt.Println("\n\n[!] Processo cancelado pelo usuário (Ctrl+C).")
+			fmt.Println("[i] O progresso de todos os capítulos já concluídos foi salvo localmente com segurança.")
+			logPipeline("ABORTADO: Cancelamento do usuário detectado no capítulo " + ch)
+			return nil
+		}
+
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "   [X] Erro crítico processando %s: %v\n", ch, err)
 			continue
@@ -249,16 +275,20 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 			if err := utils.SaveJSON(jsonPath, existingJson); err != nil {
 				fmt.Fprintf(os.Stderr, "   [!] Aviso: Erro ao salvar checkpoint incremental: %v\n", err)
+				logPipeline(fmt.Sprintf("ERRO: checkpoint JSON do cap %s: %v", ch, err))
 			} else {
 				state.CompletedChapters[ch] = true
 				_ = utils.SaveState(dbRoot, state)
+				logPipeline(fmt.Sprintf("SUCESSO: Cap %s concluído (%d imagens)", ch, len(urls)))
 			}
 			newData.Chapters = make(map[string]models.Chapter)
 		} else {
 			fmt.Fprintf(os.Stderr, "   [X] Falha geral nas imagens do capítulo.\n")
+			logPipeline(fmt.Sprintf("FALHA TOTAL: Cap %s não teve imagens salvas", ch))
 		}
 	}
 
+	logPipeline("FINALIZANDO PIPELINE de Upload. Chamando GitHub Sync...")
 	return p.uploadToGitHub(ctx, jsonPath, jsonFilename, effectiveID, ghFolder, useRoot, mangaTitle, quiet)
 }
 
@@ -287,14 +317,16 @@ func (p *Pipeline) uploadToGitHub(ctx context.Context, jsonPath, jsonFilename, e
 
 	remotePath = strings.ReplaceAll(remotePath, "\\", "/")
 
-	err = p.client.UploadJSON(ctx, remotePath, finalBytes, fmt.Sprintf("Sincronização de mangá via CLI: %s", mangaTitle))
+	err = p.client.UploadJSON(ctx, remotePath, finalBytes, fmt.Sprintf("Update %s", jsonFilename))
 	if err != nil {
+		logPipeline(fmt.Sprintf("ERRO GitHub Sync: %v", err))
 		return fmt.Errorf("falha ao submeter para o GitHub: %v", err)
 	}
 
 	if !quiet {
 		fmt.Println(">> Metadados sincronizados com Sucesso!")
 	}
+	logPipeline("SUCESSO GitHub Sync")
 	return nil
 }
 

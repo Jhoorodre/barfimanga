@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -57,7 +59,7 @@ func SanitizeFilename(name string, isFile bool) string {
 		reFolder := regexp.MustCompile(`[^\w\s_-]`)
 		temp = reFolder.ReplaceAllString(temp, "")
 
-		reSpace := regexp.MustCompile(`[\s_-]+`)
+		reSpace := regexp.MustCompile(`\s+`)
 		temp = reSpace.ReplaceAllString(temp, " ")
 
 		temp = strings.TrimSpace(temp)
@@ -73,19 +75,30 @@ func SanitizeFilename(name string, isFile bool) string {
 }
 
 // ToWSLPath converte um caminho Windows (ex: D:\...) para o formato WSL (/mnt/d/...)
-// se o caminho parecer ser um caminho Windows e estivermos em um ambiente Linux.
+// Se o usuário passar caminho com aspas ou caminho de rede (\\wsl.localhost\...), ele limpa.
 func ToWSLPath(path string) string {
-	// Verifica se parece um caminho Windows (ex: C:\ ou D:\)
-	if len(path) >= 3 && path[1] == ':' && path[2] == '\\' {
+	// 1. Remove aspas geradas pelo Drag and Drop do Windows
+	path = strings.Trim(path, "\"")
+	path = strings.Trim(path, "'")
+
+	// 2. Resolve caminhos de rede do WSL (ex: \\wsl.localhost\Ubuntu-22.04\home\...)
+	if strings.HasPrefix(path, `\\wsl.localhost\`) || strings.HasPrefix(path, `\\wsl$\`) {
+		path = strings.ReplaceAll(path, "\\", "/")
+		// "//wsl.localhost/Ubuntu-22.04/home/..." -> dividido pela barra
+		parts := strings.SplitN(path, "/", 5)
+		if len(parts) >= 5 {
+			return "/" + parts[4] // Extrai apenas a parte real do Linux (ex: /home/...)
+		}
+	}
+
+	// 3. Verifica se parece um caminho Windows tradicional (ex: C:\ ou D:\)
+	if len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
 		drive := strings.ToLower(string(path[0]))
 		remaining := strings.ReplaceAll(path[3:], "\\", "/")
 		return "/mnt/" + drive + "/" + remaining
 	}
-	// Também lida com caminhos que usam barras normais mas tem letra de unidade (ex: D:/...)
-	if len(path) >= 3 && path[1] == ':' && path[2] == '/' {
-		drive := strings.ToLower(string(path[0]))
-		return "/mnt/" + drive + "/" + path[3:]
-	}
+	
+	// Se já for linux nativo (ou outra coisa maluca), retorna como está
 	return path
 }
 
@@ -93,6 +106,34 @@ func ToWSLPath(path string) string {
 func extractNumbers(s string) []string {
 	re := regexp.MustCompile(`\d+|\D+`)
 	return re.FindAllString(s, -1)
+}
+
+// MoveFile move um arquivo de origem para o destino. Funciona inclusive entre diferentes partições no Linux (EXDEV).
+func MoveFile(src, dst string) error {
+	err := os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+	
+	// Se der erro (ex: invalid cross-device link), faz a cópia manual
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+	
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+	
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+	
+	srcFile.Close() // Fecha logo para poder remover
+	return os.Remove(src)
 }
 
 // NaturalSort ordena uma lista de strings mantendo a progressão numérica correta (ex: 1 antes de 2).

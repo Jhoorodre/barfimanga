@@ -1,39 +1,46 @@
+// Package main é o ponto de entrada principal do BarfiManga CLI.
+// Ele é responsável por gerenciar os argumentos de linha de comando (flags),
+// carregar as configurações do usuário, resolver a precedência (CLI > Env > Config)
+// e iniciar a aplicação, seja no modo interativo (TUI) ou no modo Headless (via comandos).
 package main
 
 import (
-	"context"
-	"flag"
-	"fmt"
-	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
+	"context"     // Usado para gerenciar timeouts e cancelamento seguro (Ctrl+C)
+	"flag"        // Padrão do Go para ler parâmetros passados no terminal (ex: --force)
+	"fmt"         // Formatação de entrada e saída (prints no console)
+	"os"          // Acesso a variáveis de ambiente e encerramento do processo (os.Exit)
+	"os/signal"   // Intercepta sinais do sistema operacional (ex: SIGINT)
+	"strconv"     // Converte strings em tipos primitivos numéricos
+	"syscall"     // Definições de baixo nível do sistema (ex: constantes de sinais)
 
-	"barfimanga/internal/config"
-	"barfimanga/internal/core"
-	"barfimanga/internal/tui"
+	"barfimanga/internal/config" // Gerencia o arquivo config.json e credenciais
+	"barfimanga/internal/core"   // O coração da máquina: orquestra a leitura de pastas e uploads
+	"barfimanga/internal/tui"    // Terminal User Interface: a interface gráfica no terminal
 )
 
+// cliOptions mantém em memória todas as bandeiras (flags) passadas pelo terminal na hora de rodar o programa.
+// Ex: `barfimanga --force --sync-only` preenche esta estrutura.
 type cliOptions struct {
-	ConfigMode  string
-	Interactive bool
-	Directory   string
-	Workers     int
-	Host        string
-	Quiet       bool
-	Recursive   bool
-	Retry       int
-	Token       string
-	RateLimit   float64
-	Group       string
-	MangaID     string
-	GitHubFolder string
-	UseRoot      bool
-	ForceRebuild bool
-	SyncOnly     bool
-	MangaEntry   config.MangaEntry
+	ConfigMode  string // Exibe as configurações do usuário no terminal (ex: "show")
+	Interactive bool   // Ativa a interface visual do TUI (Menu bonitinho)
+	Directory   string // O caminho físico das pastas de imagens do mangá a ser upado
+	Workers     int    // Quantas imagens subir paralelamente (se 0, usa a configuração padrão)
+	Host        string // Onde hospedar a imagem (ex: "imgbox", "catbox", "imgur")
+	Quiet       bool   // Se verdadeiro, esconde as barras de progresso (útil para automação via bash)
+	Recursive   bool   // Se verdadeiro, tentará procurar várias obras em sub-pastas (ainda não totalmente implementado)
+	Retry       int    // Quantas vezes tentar upar a mesma imagem se o host cair
+	Token       string // API Key do serviço de hospedagem escolhido
+	RateLimit   float64// Limite de requisições por segundo para evitar que o host dê ban por excesso de tráfego
+	Group       string // A Scanlator associada ao upload (Aparece no JSON do site)
+	MangaID     string // ID único que vai virar o nome do arquivo json final
+	GitHubFolder string// Se o repo tiver mangás em pastas diferentes, especifica o local
+	UseRoot      bool   // Ignora subpastas e joga o arquivo index direto no repositório root
+	ForceRebuild bool   // [PERIGO] Se verdadeiro, ele deleta caches locais e sobe TODAS as imagens de novo, ignorando as que já deram sucesso
+	SyncOnly     bool   // Se verdadeiro, ele não mexe com imagens, APENAS empurra o arquivo JSON localizado atualizado pro Github
+	MangaEntry   config.MangaEntry // Objeto com todos os metadados (título, autor, descrição) capturado do TUI
 }
 
+// parseFlags captura todas as opções digitadas no terminal e mapeia na struct cliOptions
 func parseFlags(args []string) (*cliOptions, error) {
 	opts := &cliOptions{}
 	fs := flag.NewFlagSet("barfimanga", flag.ContinueOnError)
@@ -97,9 +104,13 @@ func parseFlags(args []string) (*cliOptions, error) {
 	return opts, nil
 }
 
-// applyPrecedence aplica valores de Flags e Env Vars na Configuração carregada
+// applyPrecedence mescla as configurações.
+// O sistema respeita uma hierarquia de quem manda mais:
+// 1º - O que foi passado na linha de comando (CLI Flags)
+// 2º - Variáveis de Ambiente do Sistema Operacional (Env Vars)
+// 3º - O arquivo base de configurações do usuário (~/.config/barfimanga/config.json)
 func applyPrecedence(opts *cliOptions, cfg *config.Config) {
-	// Env Vars
+	// Nível 2: Se tem Variáveis de Ambiente (ex: .env ou export), elas sobrepõem o config.json
 	if envWorkers := os.Getenv("MU_WORKERS"); envWorkers != "" {
 		if w, err := strconv.Atoi(envWorkers); err == nil {
 			cfg.Workers = w
@@ -112,7 +123,7 @@ func applyPrecedence(opts *cliOptions, cfg *config.Config) {
 		cfg.HostToken = envToken
 	}
 
-	// CLI Flags (Maior Precedência)
+	// Nível 1: Se o usuário passou diretamente pelo terminal (ex: --workers 10), esmaga tudo e obedece
 	if opts.Workers > 0 {
 		cfg.Workers = opts.Workers
 	}
@@ -127,7 +138,9 @@ func applyPrecedence(opts *cliOptions, cfg *config.Config) {
 	}
 }
 
+// main é o maestro do CLI. Ele inicializa e dá o pontapé na execução correta baseada nas intenções do usuário.
 func main() {
+	// 1. Lê o que o usuário digitou no terminal
 	opts, err := parseFlags(os.Args[1:])
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -137,6 +150,7 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Se ele só digitou 'barfimanga --config show', imprime as credenciais e fecha o programa.
 	if opts.ConfigMode == "show" {
 		mCfg, err := config.LoadConfig()
 		if err != nil {
@@ -151,45 +165,66 @@ func main() {
 		return
 	}
 
+	// 2. Carrega as configurações do disco (JSON salvo em ~/.config/barfimanga/config.json)
 	mCfg, err := config.LoadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Erro ao carregar configuração: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Aplica precedência (Flags > Env > Config)
+	// 3. Mescla o que o usuário digitou agora (CLI) em cima da configuração do disco
 	active := mCfg.GetActive()
 	applyPrecedence(opts, &active)
 	mCfg.Profiles[mCfg.ActiveProfile] = active // Salva de volta no struct em memória
 
-	// TUI Padrão se nenhuma pasta e nem config for passada
+	// 4. Se o usuário só digitou "barfimanga" (sem pasta nem nada), força a abertura da TUI (interface gráfica de terminal)
 	if opts.Directory == "" && opts.ConfigMode == "" {
 		opts.Interactive = true
 	}
 
+	// O For { } mantém a interface viva. Se o usuário terminar de upar um mangá pela TUI, volta pro menu.
 	for {
+		var tasks []tui.UploadTask
+
 		if opts.Interactive {
-			dir, mangaID, ghFolder, forceRebuild, syncOnly, entry, err := tui.RunInteractive(&mCfg)
+			var err error
+			tasks, err = tui.RunInteractive(&mCfg)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Erro no modo interativo: %v\n", err)
 				os.Exit(1)
 			}
-			if dir != "" {
-				opts.Directory = dir
-				opts.MangaID = mangaID
-				opts.GitHubFolder = ghFolder
-				opts.ForceRebuild = forceRebuild
-				opts.SyncOnly = syncOnly
-				opts.MangaEntry = entry
-				if ghFolder == "" {
-					opts.UseRoot = true
-				}
-			} else {
-				return // Saiu de forma graciosa via Menu -> Sair
+			if len(tasks) == 0 {
+				return // Saiu de forma graciosa pressionando 'q' ou escolhendo Sair no menu
 			}
+		} else {
+			if opts.Directory == "" {
+				fmt.Println("Use -h ou --help para ver as opções.")
+				return
+			}
+			tasks = []tui.UploadTask{{
+				Directory:    opts.Directory,
+				MangaID:      opts.MangaID,
+				GitHubFolder: opts.GitHubFolder,
+				ForceRebuild: opts.ForceRebuild,
+				SyncOnly:     opts.SyncOnly,
+				MangaEntry:   opts.MangaEntry,
+			}}
 		}
 		
-		if opts.Directory != "" {
+		// 5. Início do Motor Principal (Upload Pipeline)
+		for _, task := range tasks {
+			opts.Directory = task.Directory
+			opts.MangaID = task.MangaID
+			opts.GitHubFolder = task.GitHubFolder
+			opts.ForceRebuild = task.ForceRebuild
+			opts.SyncOnly = task.SyncOnly
+			opts.MangaEntry = task.MangaEntry
+			if task.GitHubFolder == "" {
+				opts.UseRoot = true
+			} else {
+				opts.UseRoot = false
+			}
+
 			active := mCfg.GetActive()
 			applyPrecedence(opts, &active)
 			
@@ -198,33 +233,39 @@ func main() {
 				groupName = active.ScanGroup
 			}
 
-			fmt.Printf("Iniciando processo para o diretório: %s\n", opts.Directory)
+			fmt.Printf("\n==============================================\n")
+			fmt.Printf("Iniciando processo para: %s\n", opts.Directory)
 			
+			// Prepara escutador de "CTRL+C" por tarefa
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
 
-			pipeline, err := core.NewPipeline(mCfg)
+			err := func() error {
+				pipeline, err := core.NewPipeline(mCfg)
+				if err != nil {
+					return fmt.Errorf("erro ao configurar pipeline: %v", err)
+				}
+				return pipeline.Run(ctx, opts.Directory, opts.Quiet, groupName, opts.MangaID, opts.GitHubFolder, opts.UseRoot, opts.ForceRebuild, opts.MangaEntry, opts.SyncOnly)
+			}()
+
+			stop() // Libera contexto
+
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Erro ao configurar pipeline: %v\n", err)
-				if opts.Interactive { continue } else { os.Exit(1) }
-			}
-
-			if err := pipeline.Run(ctx, opts.Directory, opts.Quiet, groupName, opts.MangaID, opts.GitHubFolder, opts.UseRoot, opts.ForceRebuild, opts.MangaEntry, opts.SyncOnly); err != nil {
 				fmt.Fprintf(os.Stderr, "Erro crítico na execução: %v\n", err)
 			}
 			
-			if opts.Interactive {
-				fmt.Println("\n[!] Trabalho concluído. Retornando ao menu...")
-				// Limpa as flags do diretório para a próxima iteração do loop
-				opts.Directory = ""
-				continue 
+			// Se o usuário cancelou via Ctrl+C, interrompe todo o lote
+			if ctx.Err() != nil {
+				fmt.Println("\n[!] Cancelamento global detectado. Interrompendo fila de lote...")
+				break
 			}
-			return
-		} else {
-			if !opts.Interactive {
-				fmt.Println("Use -h ou --help para ver as opções.")
-			}
-			return
 		}
+
+		if opts.Interactive {
+			fmt.Println("\n[!] Trabalho concluído. Retornando ao menu...")
+			opts.Directory = "" // Limpa a pasta
+			continue 
+		}
+		
+		return // Headless normal, finaliza o processo
 	}
 }

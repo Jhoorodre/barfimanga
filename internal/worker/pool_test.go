@@ -46,7 +46,7 @@ func TestPool_ProcessImages_Success(t *testing.T) {
 	images := []string{"img1.jpg", "img2.jpg", "img3.jpg"}
 	tracker := &progress.ProgressTracker{Total: int64(len(images))}
 
-	results, err := pool.ProcessImages(context.Background(), images, tracker, nil)
+	results, err := pool.ProcessImages(context.Background(), images, tracker, nil, false)
 	
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
@@ -77,7 +77,7 @@ func TestPool_ProcessImages_Failure(t *testing.T) {
 
 	images := []string{"ok1.jpg", "fail.jpg", "ok2.jpg"}
 	
-	results, err := pool.ProcessImages(context.Background(), images, nil, nil)
+	results, err := pool.ProcessImages(context.Background(), images, nil, nil, false)
 	
 	if err != nil {
 		t.Fatalf("Expected pool to complete despite individual image failures, got: %v", err)
@@ -104,7 +104,7 @@ func TestPool_RateLimiting(t *testing.T) {
 	images := []string{"1", "2", "3"}
 	
 	start := time.Now()
-	_, _ = pool.ProcessImages(context.Background(), images, nil, nil)
+	_, _ = pool.ProcessImages(context.Background(), images, nil, nil, false)
 	elapsed := time.Since(start)
 
 	// With 10 req/sec, processing 3 images should take at least ~200ms 
