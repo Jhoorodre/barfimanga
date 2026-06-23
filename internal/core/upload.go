@@ -26,7 +26,7 @@ func logPipeline(msg string) {
 	}
 	logPath := filepath.Join(dir, "bd", "pipeline.log")
 	os.MkdirAll(filepath.Dir(logPath), 0755)
-	
+
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err == nil {
 		defer f.Close()
@@ -80,6 +80,10 @@ func NewPipeline(mCfg config.MultiConfig) (*Pipeline, error) {
 }
 
 func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName string, mangaID string, ghFolder string, useRoot bool, forceRebuild bool, entry config.MangaEntry, syncOnly bool) error {
+	if entry.ScanGroup != "" {
+		groupName = entry.ScanGroup
+	}
+
 	mangaTitle := filepath.Base(dir)
 	mangaRoot := dir
 
@@ -138,7 +142,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			return fmt.Errorf("erro ao criar diretório de metadados: %v", err)
 		}
 	}
-	
+
 	jsonFilename := effectiveID + ".json"
 	jsonPath := filepath.Join(dbRoot, jsonFilename)
 
@@ -204,7 +208,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		if !quiet {
 			fmt.Printf("\n-> Capítulo: %s\n", ch)
 		}
-		
+
 		var chDir string
 		if !hasSubDirs {
 			chDir = dir

@@ -93,9 +93,9 @@ func TestEndToEnd_Upload(t *testing.T) {
 	// As we can't easily inject the mock server URL deep into the hardcoded hosts via simple config,
 	// an alternative approach is needed if we were to test the actual HTTP requests inside hosts.
 	// For this test scope, verifying the directory parsing and JSON output is the main goal.
-	
+
 	// We'll just verify the flags and parsing logic worked together without panicking
-	
+
 	// Ensure the base directory has NO reader.json initially
 	jsonPath := filepath.Join(tmpDir, filepath.Base(tmpDir)+".json")
 	if _, err := os.Stat(jsonPath); !os.IsNotExist(err) {

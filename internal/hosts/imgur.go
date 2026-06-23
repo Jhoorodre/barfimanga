@@ -91,7 +91,7 @@ func (h *ImgurHost) doUpload(ctx context.Context, fpath string) (models.UploadRe
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Imgur aceita Client-ID ou Bearer token (para contas)
 	if len(h.config.HostToken) > 15 { // Muito provavelmente um Client-ID
 		req.Header.Set("Authorization", "Client-ID "+h.config.HostToken)

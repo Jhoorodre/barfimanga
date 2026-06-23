@@ -22,13 +22,14 @@ type MangaEntry struct {
 	Author           string `json:"author"`
 	Cover            string `json:"cover"`
 	Status           string `json:"status"`
+	ScanGroup        string `json:"scan_group,omitempty"`
 }
 
 // Config representa as configurações de um perfil individual.
 type Config struct {
 	GitHubTokenEnv string                `json:"github_token_env,omitempty"` // Qual var do .env usar
-	GitHubToken    string                `json:"-"` // Mantido em memória (lido dinamicamente do .env)
-	GitHubRepo     string                `json:"github_repo,omitempty"` // owner/repo
+	GitHubToken    string                `json:"-"`                          // Mantido em memória (lido dinamicamente do .env)
+	GitHubRepo     string                `json:"github_repo,omitempty"`      // owner/repo
 	GitHubBranch   string                `json:"github_branch,omitempty"`
 	ScanGroup      string                `json:"scan_group,omitempty"`
 	DefaultHost    string                `json:"default_host,omitempty"`
@@ -78,7 +79,7 @@ func LoadConfig() (MultiConfig, error) {
 	if err != nil {
 		return MultiConfig{}, err
 	}
-	
+
 	// Garante que a pasta bd/ exista
 	os.MkdirAll(dir, 0700)
 

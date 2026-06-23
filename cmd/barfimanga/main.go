@@ -5,13 +5,13 @@
 package main
 
 import (
-	"context"     // Usado para gerenciar timeouts e cancelamento seguro (Ctrl+C)
-	"flag"        // Padrão do Go para ler parâmetros passados no terminal (ex: --force)
-	"fmt"         // Formatação de entrada e saída (prints no console)
-	"os"          // Acesso a variáveis de ambiente e encerramento do processo (os.Exit)
-	"os/signal"   // Intercepta sinais do sistema operacional (ex: SIGINT)
-	"strconv"     // Converte strings em tipos primitivos numéricos
-	"syscall"     // Definições de baixo nível do sistema (ex: constantes de sinais)
+	"context"   // Usado para gerenciar timeouts e cancelamento seguro (Ctrl+C)
+	"flag"      // Padrão do Go para ler parâmetros passados no terminal (ex: --force)
+	"fmt"       // Formatação de entrada e saída (prints no console)
+	"os"        // Acesso a variáveis de ambiente e encerramento do processo (os.Exit)
+	"os/signal" // Intercepta sinais do sistema operacional (ex: SIGINT)
+	"strconv"   // Converte strings em tipos primitivos numéricos
+	"syscall"   // Definições de baixo nível do sistema (ex: constantes de sinais)
 
 	"barfimanga/internal/config" // Gerencia o arquivo config.json e credenciais
 	"barfimanga/internal/core"   // O coração da máquina: orquestra a leitura de pastas e uploads
@@ -21,22 +21,22 @@ import (
 // cliOptions mantém em memória todas as bandeiras (flags) passadas pelo terminal na hora de rodar o programa.
 // Ex: `barfimanga --force --sync-only` preenche esta estrutura.
 type cliOptions struct {
-	ConfigMode  string // Exibe as configurações do usuário no terminal (ex: "show")
-	Interactive bool   // Ativa a interface visual do TUI (Menu bonitinho)
-	Directory   string // O caminho físico das pastas de imagens do mangá a ser upado
-	Workers     int    // Quantas imagens subir paralelamente (se 0, usa a configuração padrão)
-	Host        string // Onde hospedar a imagem (ex: "imgbox", "catbox", "imgur")
-	Quiet       bool   // Se verdadeiro, esconde as barras de progresso (útil para automação via bash)
-	Recursive   bool   // Se verdadeiro, tentará procurar várias obras em sub-pastas (ainda não totalmente implementado)
-	Retry       int    // Quantas vezes tentar upar a mesma imagem se o host cair
-	Token       string // API Key do serviço de hospedagem escolhido
-	RateLimit   float64// Limite de requisições por segundo para evitar que o host dê ban por excesso de tráfego
-	Group       string // A Scanlator associada ao upload (Aparece no JSON do site)
-	MangaID     string // ID único que vai virar o nome do arquivo json final
-	GitHubFolder string// Se o repo tiver mangás em pastas diferentes, especifica o local
-	UseRoot      bool   // Ignora subpastas e joga o arquivo index direto no repositório root
-	ForceRebuild bool   // [PERIGO] Se verdadeiro, ele deleta caches locais e sobe TODAS as imagens de novo, ignorando as que já deram sucesso
-	SyncOnly     bool   // Se verdadeiro, ele não mexe com imagens, APENAS empurra o arquivo JSON localizado atualizado pro Github
+	ConfigMode   string            // Exibe as configurações do usuário no terminal (ex: "show")
+	Interactive  bool              // Ativa a interface visual do TUI (Menu bonitinho)
+	Directory    string            // O caminho físico das pastas de imagens do mangá a ser upado
+	Workers      int               // Quantas imagens subir paralelamente (se 0, usa a configuração padrão)
+	Host         string            // Onde hospedar a imagem (ex: "imgbox", "catbox", "imgur")
+	Quiet        bool              // Se verdadeiro, esconde as barras de progresso (útil para automação via bash)
+	Recursive    bool              // Se verdadeiro, tentará procurar várias obras em sub-pastas (ainda não totalmente implementado)
+	Retry        int               // Quantas vezes tentar upar a mesma imagem se o host cair
+	Token        string            // API Key do serviço de hospedagem escolhido
+	RateLimit    float64           // Limite de requisições por segundo para evitar que o host dê ban por excesso de tráfego
+	Group        string            // A Scanlator associada ao upload (Aparece no JSON do site)
+	MangaID      string            // ID único que vai virar o nome do arquivo json final
+	GitHubFolder string            // Se o repo tiver mangás em pastas diferentes, especifica o local
+	UseRoot      bool              // Ignora subpastas e joga o arquivo index direto no repositório root
+	ForceRebuild bool              // [PERIGO] Se verdadeiro, ele deleta caches locais e sobe TODAS as imagens de novo, ignorando as que já deram sucesso
+	SyncOnly     bool              // Se verdadeiro, ele não mexe com imagens, APENAS empurra o arquivo JSON localizado atualizado pro Github
 	MangaEntry   config.MangaEntry // Objeto com todos os metadados (título, autor, descrição) capturado do TUI
 }
 
@@ -52,10 +52,10 @@ func parseFlags(args []string) (*cliOptions, error) {
 	}
 
 	fs.StringVar(&opts.ConfigMode, "config", "", "Gerenciar configurações (opções: show)")
-	
+
 	fs.BoolVar(&opts.Interactive, "interactive", false, "Iniciar modo interativo")
 	fs.BoolVar(&opts.Interactive, "i", false, "Iniciar modo interativo (alias)")
-	
+
 	fs.StringVar(&opts.Directory, "dir", "", "Diretório contendo as imagens do mangá")
 	fs.StringVar(&opts.Directory, "d", "", "Diretório contendo as imagens do mangá (alias)")
 
@@ -85,7 +85,7 @@ func parseFlags(args []string) (*cliOptions, error) {
 	fs.BoolVar(&opts.Recursive, "r", false, "Upload recursivo de diretórios (alias)")
 
 	fs.IntVar(&opts.Retry, "retry", 3, "Número de tentativas em caso de falha")
-	
+
 	fs.StringVar(&opts.Token, "token", "", "Token do host de imagem")
 	fs.StringVar(&opts.Token, "t", "", "Token do host de imagem (alias)")
 
@@ -210,7 +210,7 @@ func main() {
 				MangaEntry:   opts.MangaEntry,
 			}}
 		}
-		
+
 		// 5. Início do Motor Principal (Upload Pipeline)
 		for _, task := range tasks {
 			opts.Directory = task.Directory
@@ -227,7 +227,7 @@ func main() {
 
 			active := mCfg.GetActive()
 			applyPrecedence(opts, &active)
-			
+
 			groupName := opts.Group
 			if opts.Group == "Default" && active.ScanGroup != "" {
 				groupName = active.ScanGroup
@@ -235,7 +235,7 @@ func main() {
 
 			fmt.Printf("\n==============================================\n")
 			fmt.Printf("Iniciando processo para: %s\n", opts.Directory)
-			
+
 			// Prepara escutador de "CTRL+C" por tarefa
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
@@ -252,7 +252,7 @@ func main() {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Erro crítico na execução: %v\n", err)
 			}
-			
+
 			// Se o usuário cancelou via Ctrl+C, interrompe todo o lote
 			if ctx.Err() != nil {
 				fmt.Println("\n[!] Cancelamento global detectado. Interrompendo fila de lote...")
@@ -263,9 +263,9 @@ func main() {
 		if opts.Interactive {
 			fmt.Println("\n[!] Trabalho concluído. Retornando ao menu...")
 			opts.Directory = "" // Limpa a pasta
-			continue 
+			continue
 		}
-		
+
 		return // Headless normal, finaliza o processo
 	}
 }

@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/time/rate"
 	"barfimanga/internal/cache"
 	"barfimanga/internal/hosts"
 	"barfimanga/internal/models"
 	"barfimanga/internal/progress"
+	"golang.org/x/time/rate"
 )
 
 // Pool gerencia o upload paralelo de arquivos com controle de taxa de requisições.
@@ -94,7 +94,7 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 					}
 					var uploadRes models.UploadResult
 					var uploadErr error
-					
+
 					// Retry logic
 					maxRetries := 3
 					for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -102,7 +102,7 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 						if uploadErr == nil && uploadRes.Success {
 							break
 						}
-						
+
 						if attempt < maxRetries {
 							// Exponetial backoff: 1s, 2s, 4s...
 							backoffStr := 1 << (attempt - 1)
@@ -117,7 +117,7 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 						} else if uploadRes.Error != "" {
 							errMsg = uploadRes.Error
 						}
-						
+
 						res = models.UploadResult{
 							URL:      "",
 							Filename: j.filepath,
@@ -134,7 +134,7 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 				}
 
 				results <- result{res: res, index: j.index}
-				
+
 				if tracker != nil {
 					tracker.Increment()
 				}

@@ -54,7 +54,7 @@ func SaveJSON(path string, data *models.ReaderJSON) error {
 
 	buffer := &bytes.Buffer{}
 	buffer.WriteString("{\n")
-	
+
 	// Serializa os campos base do arquivo JSON
 	baseData := map[string]string{
 		"title":       data.Title,
@@ -64,7 +64,7 @@ func SaveJSON(path string, data *models.ReaderJSON) error {
 		"cover":       data.Cover,
 		"status":      data.Status,
 	}
-	
+
 	// Printa os meta-dados basicos primeiro
 	metaKeys := []string{"title", "description", "artist", "author", "cover", "status"}
 	for _, mk := range metaKeys {
@@ -84,7 +84,7 @@ func SaveJSON(path string, data *models.ReaderJSON) error {
 			buffer.WriteString("\n")
 		}
 	}
-	
+
 	buffer.WriteString("  }\n}")
 
 	return os.WriteFile(path, buffer.Bytes(), 0644)
@@ -126,12 +126,24 @@ func MergeMetadata(existing *models.ReaderJSON, newData *models.ReaderJSON, mode
 	}
 
 	// Atualiza as chaves base se não forem vazias no novo
-	if newData.Title != "" { merged.Title = newData.Title }
-	if newData.Description != "" { merged.Description = newData.Description }
-	if newData.Artist != "" { merged.Artist = newData.Artist }
-	if newData.Author != "" { merged.Author = newData.Author }
-	if newData.Cover != "" { merged.Cover = newData.Cover }
-	if newData.Status != "" { merged.Status = newData.Status }
+	if newData.Title != "" {
+		merged.Title = newData.Title
+	}
+	if newData.Description != "" {
+		merged.Description = newData.Description
+	}
+	if newData.Artist != "" {
+		merged.Artist = newData.Artist
+	}
+	if newData.Author != "" {
+		merged.Author = newData.Author
+	}
+	if newData.Cover != "" {
+		merged.Cover = newData.Cover
+	}
+	if newData.Status != "" {
+		merged.Status = newData.Status
+	}
 
 	// Copia chapters existentes
 	for k, v := range existing.Chapters {
@@ -146,12 +158,12 @@ func MergeMetadata(existing *models.ReaderJSON, newData *models.ReaderJSON, mode
 	// Adiciona ou faz update (smart/add mode)
 	// Para garantir que a ordem das chaves (001, 002, 003) coincida com a ordem cronológica dos capítulos,
 	// vamos ordenar os novos capítulos antes de atribuir chaves.
-	
+
 	var newChTitles []string
 	for title := range newData.Chapters {
 		newChTitles = append(newChTitles, title)
 	}
-	
+
 	// Ordena os novos capítulos de forma CRESCENTE para que o mais antigo ganhe o menor ID disponível
 	// e o mais novo ganhe o maior ID.
 	sort.Slice(newChTitles, func(i, j int) bool {
@@ -173,7 +185,7 @@ func MergeMetadata(existing *models.ReaderJSON, newData *models.ReaderJSON, mode
 
 	maxIdx := getMaxChapterIndex(merged.Chapters)
 	if maxIdx == -1 {
-		maxIdx = 0 
+		maxIdx = 0
 	}
 
 	for _, title := range newChTitles {

@@ -15,19 +15,19 @@ type UploadState struct {
 func LoadState(dir string) *UploadState {
 	path := filepath.Join(dir, ".upload_state.json")
 	data, err := os.ReadFile(path)
-	
+
 	state := &UploadState{
 		CompletedChapters: make(map[string]bool),
 	}
-	
+
 	if err == nil {
 		_ = json.Unmarshal(data, state)
 	}
-	
+
 	if state.CompletedChapters == nil {
 		state.CompletedChapters = make(map[string]bool)
 	}
-	
+
 	return state
 }
 

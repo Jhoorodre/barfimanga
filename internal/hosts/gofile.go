@@ -153,16 +153,16 @@ func (h *GofileHost) UploadImage(ctx context.Context, filePath string) (models.U
 
 func (h *GofileHost) getDirectLink(ctx context.Context, fileCode string) string {
 	contentURL := fmt.Sprintf("https://api.gofile.io/getContent?contentId=%s", fileCode)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", contentURL, nil)
 	if err != nil {
 		return ""
 	}
-	
-	// É necessário o token para `getContent`? Gofile diz que sim para dados completos de conta, 
+
+	// É necessário o token para `getContent`? Gofile diz que sim para dados completos de conta,
 	// mas pastas publicas podem responder.
 	if h.config.HostToken != "" {
-		req.Header.Set("Authorization", "Bearer " + h.config.HostToken)
+		req.Header.Set("Authorization", "Bearer "+h.config.HostToken)
 	}
 
 	resp, err := h.client.Do(req)
@@ -180,7 +180,7 @@ func (h *GofileHost) getDirectLink(ctx context.Context, fileCode string) string 
 			Name       string `json:"name"`
 		} `json:"data"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return ""
 	}
@@ -195,7 +195,7 @@ func (h *GofileHost) getDirectLink(ctx context.Context, fileCode string) string 
 			}
 		}
 	}
-	
+
 	return ""
 }
 

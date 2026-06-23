@@ -163,13 +163,13 @@ func selectFromLibrary(mCfg *config.MultiConfig) (UploadTask, error) {
 	}
 
 	entry := prof.Library[selectedName]
-	
+
 	// Sub-menu de ações para a obra selecionada
 	var action string
 	actionForm := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Ações para: " + entry.Name).
+				Title("Ações para: "+entry.Name).
 				Options(
 					huh.NewOption("Fazer Upload Completo (Imagens + JSON)", "upload"),
 					huh.NewOption("Sincronizar Apenas Metadados (JSON)", "sync"),
@@ -178,7 +178,7 @@ func selectFromLibrary(mCfg *config.MultiConfig) (UploadTask, error) {
 				Value(&action),
 		),
 	)
-	
+
 	if err := actionForm.Run(); err != nil || action == "back" {
 		return UploadTask{}, nil
 	}
@@ -199,7 +199,7 @@ func selectFromLibrary(mCfg *config.MultiConfig) (UploadTask, error) {
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title(fmt.Sprintf("Iniciar Upload de '%s'?", entry.Name)).
-				Description("Caminho: " + entry.LocalPath).
+				Description("Caminho: "+entry.LocalPath).
 				Value(new(bool)), // Apenas visual
 			huh.NewConfirm().
 				Title("Forçar Re-upload (Rebuild)?").
@@ -266,7 +266,9 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 				huh.NewMultiSelect[string]().Title("Selecionar Obras (Espaço = marcar, Esc = cancelar)").Options(options...).Value(&selectedNames),
 			),
 		)
-		if err := form.Run(); err != nil { return nil, nil }
+		if err := form.Run(); err != nil {
+			return nil, nil
+		}
 
 	} else if mode == "numbered" {
 		var sortedNames []string
@@ -280,7 +282,7 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 			fmt.Printf("[%3d] %s\n", i+1, name)
 		}
 		fmt.Println("---------------------------")
-		
+
 		fmt.Print("Digite os números (ex: 1, 5). Aperte ENTER vazio para VOLTAR: ")
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
@@ -293,7 +295,9 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 		parts := strings.Split(inputStr, ",")
 		for _, p := range parts {
 			p = strings.TrimSpace(p)
-			if p == "" { continue }
+			if p == "" {
+				continue
+			}
 			idx, err := strconv.Atoi(p)
 			if err == nil && idx >= 1 && idx <= len(sortedNames) {
 				selectedNames = append(selectedNames, sortedNames[idx-1])
@@ -303,14 +307,18 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 	} else if mode == "paste" {
 		var pasted string
 		pasteForm := huh.NewForm(huh.NewGroup(huh.NewText().Title("Cole a lista de Nomes/IDs (Aperte ENTER vazio p/ VOLTAR)").Value(&pasted).Lines(8)))
-		if err := pasteForm.Run(); err != nil || strings.TrimSpace(pasted) == "" { return nil, nil }
+		if err := pasteForm.Run(); err != nil || strings.TrimSpace(pasted) == "" {
+			return nil, nil
+		}
 
 		pasted = strings.ReplaceAll(pasted, "\n", ",")
 		parts := strings.Split(pasted, ",")
 		lookup := make(map[string]bool)
 		for _, p := range parts {
 			p = strings.TrimSpace(p)
-			if p != "" { lookup[strings.ToLower(p)] = true }
+			if p != "" {
+				lookup[strings.ToLower(p)] = true
+			}
 		}
 		for _, entry := range prof.Library {
 			if lookup[strings.ToLower(entry.Name)] || lookup[strings.ToLower(entry.MangaID)] {
@@ -325,7 +333,9 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 			selectedNames = append(selectedNames, entry.Name) // Pré-seleciona todas!
 		}
 		form := huh.NewForm(huh.NewGroup(huh.NewMultiSelect[string]().Title("Desmarque as que NÃO quer (Esc = cancelar)").Options(options...).Value(&selectedNames)))
-		if err := form.Run(); err != nil || len(selectedNames) == 0 { return nil, nil }
+		if err := form.Run(); err != nil || len(selectedNames) == 0 {
+			return nil, nil
+		}
 
 	} else if mode == "all" {
 		for _, entry := range prof.Library {
@@ -335,10 +345,14 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 	} else if mode == "recent" {
 		var daysStr string
 		daysForm := huh.NewForm(huh.NewGroup(huh.NewInput().Title("Atualizadas nos últimos X dias? (Aperte ENTER vazio p/ VOLTAR)").Value(&daysStr)))
-		if err := daysForm.Run(); err != nil || strings.TrimSpace(daysStr) == "" { return nil, nil }
-		
+		if err := daysForm.Run(); err != nil || strings.TrimSpace(daysStr) == "" {
+			return nil, nil
+		}
+
 		days, err := strconv.Atoi(daysStr)
-		if err != nil { days = 7 }
+		if err != nil {
+			days = 7
+		}
 
 		for _, entry := range prof.Library {
 			info, err := os.Stat(utils.ToWSLPath(entry.LocalPath))
@@ -371,16 +385,22 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 	} else if mode == "status" {
 		var selectedStatus string
 		statusForm := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Filtro Status").Options(huh.NewOption("Em Andamento", "Em Andamento"), huh.NewOption("Finalizado", "Finalizado"), huh.NewOption("Cancelado", "Cancelado"), huh.NewOption("Pausado", "Pausado"), huh.NewOption("<- Voltar", "back")).Value(&selectedStatus)))
-		if err := statusForm.Run(); err != nil || selectedStatus == "back" { return nil, nil }
+		if err := statusForm.Run(); err != nil || selectedStatus == "back" {
+			return nil, nil
+		}
 		for _, entry := range prof.Library {
-			if entry.Status == selectedStatus { selectedNames = append(selectedNames, entry.Name) }
+			if entry.Status == selectedStatus {
+				selectedNames = append(selectedNames, entry.Name)
+			}
 		}
 
 	} else if mode == "alpha" {
 		var letters string
 		alphaForm := huh.NewForm(huh.NewGroup(huh.NewInput().Title("Letras iniciais (Ex: A, B. Aperte ENTER vazio p/ VOLTAR)").Value(&letters)))
-		if err := alphaForm.Run(); err != nil || strings.TrimSpace(letters) == "" { return nil, nil }
-		
+		if err := alphaForm.Run(); err != nil || strings.TrimSpace(letters) == "" {
+			return nil, nil
+		}
+
 		parts := strings.Split(strings.ToUpper(letters), ",")
 		for _, entry := range prof.Library {
 			upperName := strings.ToUpper(entry.Name)
@@ -398,7 +418,7 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 		fmt.Println("\n[!] Nenhum mangá atendeu aos critérios do filtro ou operação cancelada.")
 		return nil, nil
 	}
-	
+
 	fmt.Printf("\n[+] %d obras selecionadas para o lote:\n", len(selectedNames))
 	for i, name := range selectedNames {
 		fmt.Printf("   %d. %s\n", i+1, name)
@@ -411,7 +431,7 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 	if strings.ToLower(strings.TrimSpace(scanner.Text())) == "v" {
 		return nil, nil
 	}
-	
+
 	var action string
 	actionForm := huh.NewForm(
 		huh.NewGroup(
@@ -425,7 +445,7 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 				Value(&action),
 		),
 	)
-	
+
 	if err := actionForm.Run(); err != nil || action == "back" {
 		return nil, nil
 	}
@@ -498,7 +518,7 @@ func manageLibrary(mCfg *config.MultiConfig) error {
 			manageForm := huh.NewForm(
 				huh.NewGroup(
 					huh.NewSelect[string]().
-						Title("Gerenciar: " + entry.Name).
+						Title("Gerenciar: "+entry.Name).
 						Options(
 							huh.NewOption("Editar Informações", "edit"),
 							huh.NewOption("Excluir da Biblioteca", "delete"),
@@ -507,11 +527,11 @@ func manageLibrary(mCfg *config.MultiConfig) error {
 						Value(&manageAction),
 				),
 			)
-			
+
 			if err := manageForm.Run(); err != nil || manageAction == "back" {
 				continue
 			}
-			
+
 			if manageAction == "edit" {
 				oldName := entry.Name
 				oldMeta := entry.MetadataPath
@@ -526,7 +546,7 @@ func manageLibrary(mCfg *config.MultiConfig) error {
 						if oldMeta != "" {
 							oldRoot = filepath.Join(utils.ToWSLPath(oldMeta), utils.SanitizeFilename(oldFolderBase, false))
 						}
-						
+
 						newRoot := utils.ToWSLPath(entry.LocalPath)
 						newFolderBase := filepath.Base(newRoot)
 						if entry.MetadataPath != "" {
@@ -535,7 +555,7 @@ func manageLibrary(mCfg *config.MultiConfig) error {
 
 						if oldRoot != newRoot {
 							os.MkdirAll(newRoot, 0755)
-							
+
 							oldEffectiveID := oldID
 							if oldEffectiveID == "" {
 								oldEffectiveID = utils.SanitizeFilename(oldName, false)
@@ -546,8 +566,8 @@ func manageLibrary(mCfg *config.MultiConfig) error {
 							}
 
 							filesToMove := map[string]string{
-								".manga_cache.json": ".manga_cache.json",
-								".upload_state.json": ".upload_state.json",
+								".manga_cache.json":      ".manga_cache.json",
+								".upload_state.json":     ".upload_state.json",
 								oldEffectiveID + ".json": newEffectiveID + ".json",
 							}
 
@@ -558,7 +578,7 @@ func manageLibrary(mCfg *config.MultiConfig) error {
 									utils.MoveFile(oldFilePath, newFilePath)
 								}
 							}
-							
+
 							// Tenta remover a pasta antiga caso ela tenha ficado vazia
 							os.Remove(oldRoot)
 						}
@@ -629,6 +649,9 @@ func editMangaEntry(entry *config.MangaEntry) error {
 			huh.NewInput().Title("Status").
 				Description("Ex: 'Em Andamento', 'Finalizado', 'Hiato'").
 				Value(&entry.Status),
+			huh.NewInput().Title("Scan Group (Opcional)").
+				Description("Grupo responsável. Ex: 'Eremita Scan'. Deixe vazio para usar o padrão do perfil.").
+				Value(&entry.ScanGroup),
 		),
 	)
 

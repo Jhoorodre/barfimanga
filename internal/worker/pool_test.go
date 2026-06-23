@@ -26,7 +26,7 @@ func (m *mockHost) CreateAlbum(ctx context.Context, title, description string, i
 
 func (m *mockHost) UploadImage(ctx context.Context, filepath string) (models.UploadResult, error) {
 	time.Sleep(10 * time.Millisecond) // Simulate network delay
-	
+
 	if m.shouldFail && filepath == "fail.jpg" {
 		return models.UploadResult{}, fmt.Errorf("simulated upload error")
 	}
@@ -47,7 +47,7 @@ func TestPool_ProcessImages_Success(t *testing.T) {
 	tracker := &progress.ProgressTracker{Total: int64(len(images))}
 
 	results, err := pool.ProcessImages(context.Background(), images, tracker, nil, false)
-	
+
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -76,9 +76,9 @@ func TestPool_ProcessImages_Failure(t *testing.T) {
 	pool := worker.NewPool(host, 1, 0)
 
 	images := []string{"ok1.jpg", "fail.jpg", "ok2.jpg"}
-	
+
 	results, err := pool.ProcessImages(context.Background(), images, nil, nil, false)
-	
+
 	if err != nil {
 		t.Fatalf("Expected pool to complete despite individual image failures, got: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestPool_ProcessImages_Failure(t *testing.T) {
 	if results[0].Success != true {
 		t.Errorf("Expected ok1 to succeed")
 	}
-	
+
 	if results[1].Success != false {
 		t.Errorf("Expected fail.jpg to fail")
 	}
@@ -102,12 +102,12 @@ func TestPool_RateLimiting(t *testing.T) {
 	pool := worker.NewPool(host, 5, 10.0)
 
 	images := []string{"1", "2", "3"}
-	
+
 	start := time.Now()
 	_, _ = pool.ProcessImages(context.Background(), images, nil, nil, false)
 	elapsed := time.Since(start)
 
-	// With 10 req/sec, processing 3 images should take at least ~200ms 
+	// With 10 req/sec, processing 3 images should take at least ~200ms
 	// (0ms for first, 100ms for second, 100ms for third).
 	// We check if it took more than 150ms to account for test speed variations.
 	if elapsed < 150*time.Millisecond {

@@ -97,7 +97,7 @@ func ToWSLPath(path string) string {
 		remaining := strings.ReplaceAll(path[3:], "\\", "/")
 		return "/mnt/" + drive + "/" + remaining
 	}
-	
+
 	// Se já for linux nativo (ou outra coisa maluca), retorna como está
 	return path
 }
@@ -114,24 +114,24 @@ func MoveFile(src, dst string) error {
 	if err == nil {
 		return nil
 	}
-	
+
 	// Se der erro (ex: invalid cross-device link), faz a cópia manual
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer srcFile.Close()
-	
+
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer dstFile.Close()
-	
+
 	if _, err = io.Copy(dstFile, srcFile); err != nil {
 		return err
 	}
-	
+
 	srcFile.Close() // Fecha logo para poder remover
 	return os.Remove(src)
 }
