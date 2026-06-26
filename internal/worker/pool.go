@@ -14,24 +14,29 @@ import (
 
 // Pool gerencia o upload paralelo de arquivos com controle de taxa de requisições.
 type Pool struct {
-	host    hosts.Host
-	workers int
-	limiter *rate.Limiter
+	host       hosts.Host
+	workers    int
+	limiter    *rate.Limiter
+	maxRetries int
 }
 
 // NewPool cria um novo pool. requestsPerSecond define a quantidade de chamadas por segundo.
-func NewPool(host hosts.Host, workers int, requestsPerSecond float64) *Pool {
+func NewPool(host hosts.Host, workers int, requestsPerSecond float64, maxRetries int) *Pool {
 	var limit rate.Limit
 	if requestsPerSecond > 0 {
 		limit = rate.Limit(requestsPerSecond)
 	} else {
 		limit = rate.Inf
 	}
+	if maxRetries <= 0 {
+		maxRetries = 8
+	}
 
 	return &Pool{
-		host:    host,
-		workers: workers,
-		limiter: rate.NewLimiter(limit, 1),
+		host:       host,
+		workers:    workers,
+		limiter:    rate.NewLimiter(limit, 1),
+		maxRetries: maxRetries,
 	}
 }
 
@@ -96,17 +101,20 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 					var uploadErr error
 
 					// Retry logic agressivo para lidar com falhas de ActiveModel do backend Ruby (ImgBox)
-					maxRetries := 8
-					for attempt := 1; attempt <= maxRetries; attempt++ {
+					for attempt := 1; attempt <= p.maxRetries; attempt++ {
 						uploadRes, uploadErr = p.host.UploadImage(ctx, j.filepath)
 						if uploadErr == nil && uploadRes.Success {
 							break
 						}
 
-						if attempt < maxRetries {
+						if attempt < p.maxRetries {
 							// Exponential backoff mais conservador: 2s, 4s, 8s, 16s, 32s...
 							backoffTime := 1 << attempt
-							time.Sleep(time.Duration(backoffTime) * time.Second)
+							select {
+							case <-time.After(time.Duration(backoffTime) * time.Second):
+							case <-ctx.Done():
+								return
+							}
 						}
 					}
 

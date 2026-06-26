@@ -26,12 +26,6 @@ func LoadJSON(path string) (*models.ReaderJSON, error) {
 	return &r, nil
 }
 
-// orderedChapter represents a key-value pair for custom JSON marshaling
-type orderedChapter struct {
-	Key   string
-	Value models.Chapter
-}
-
 // SaveJSON salva a estrutura ReaderJSON em disco com segurança (incremental), forçando ordem decrescente.
 func SaveJSON(path string, data *models.ReaderJSON) error {
 	dir := filepath.Dir(path)
@@ -45,10 +39,10 @@ func SaveJSON(path string, data *models.ReaderJSON) error {
 		keys = append(keys, k)
 	}
 
-	// Ordena as chaves de forma decrescente NUMÉRICA (ex: "003", "002", "001")
+	// Ordena as chaves de forma decrescente numérica, suportando decimais ("019.1", "019.2")
 	sort.Slice(keys, func(i, j int) bool {
-		numI, _ := strconv.Atoi(keys[i])
-		numJ, _ := strconv.Atoi(keys[j])
+		numI, _ := strconv.ParseFloat(keys[i], 64)
+		numJ, _ := strconv.ParseFloat(keys[j], 64)
 		return numI > numJ
 	})
 
@@ -88,19 +82,6 @@ func SaveJSON(path string, data *models.ReaderJSON) error {
 	buffer.WriteString("  }\n}")
 
 	return os.WriteFile(path, buffer.Bytes(), 0644)
-}
-
-// getMaxChapterIndex descobre o maior índice numérico atual.
-func getMaxChapterIndex(chapters map[string]models.Chapter) int {
-	maxIdx := -1
-	for k := range chapters {
-		if idx, err := strconv.Atoi(k); err == nil {
-			if idx > maxIdx {
-				maxIdx = idx
-			}
-		}
-	}
-	return maxIdx
 }
 
 // findChapterByTitle verifica se um capítulo com o mesmo título já existe.
@@ -183,20 +164,16 @@ func MergeMetadata(existing *models.ReaderJSON, newData *models.ReaderJSON, mode
 		return len(a) < len(b)
 	})
 
-	maxIdx := getMaxChapterIndex(merged.Chapters)
-	if maxIdx == -1 {
-		maxIdx = 0
-	}
-
-	for _, title := range newChTitles {
-		newCh := newData.Chapters[title]
-		existingKey := findChapterByTitle(merged.Chapters, newCh.Title)
-		if existingKey != "" {
-			merged.Chapters[existingKey] = newCh
+	for _, key := range newChTitles {
+		newCh := newData.Chapters[key]
+		// Tenta primeiro pela chave numérica; se não achar, busca por título (compatibilidade com formato antigo)
+		if _, exists := merged.Chapters[key]; exists {
+			merged.Chapters[key] = newCh
+		} else if existingKey := findChapterByTitle(merged.Chapters, newCh.Title); existingKey != "" {
+			delete(merged.Chapters, existingKey)
+			merged.Chapters[key] = newCh
 		} else {
-			maxIdx++
-			newKey := fmt.Sprintf("%03d", maxIdx)
-			merged.Chapters[newKey] = newCh
+			merged.Chapters[key] = newCh
 		}
 	}
 

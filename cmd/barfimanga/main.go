@@ -136,6 +136,9 @@ func applyPrecedence(opts *cliOptions, cfg *config.Config) {
 	if opts.RateLimit > 0 {
 		cfg.RateLimit = opts.RateLimit
 	}
+	if opts.Retry > 0 {
+		cfg.MaxRetries = opts.Retry
+	}
 }
 
 // main é o maestro do CLI. Ele inicializa e dá o pontapé na execução correta baseada nas intenções do usuário.
@@ -247,14 +250,16 @@ func main() {
 				return pipeline.Run(ctx, opts.Directory, opts.Quiet, groupName, opts.MangaID, opts.GitHubFolder, opts.UseRoot, opts.ForceRebuild, opts.MangaEntry, opts.SyncOnly)
 			}()
 
-			stop() // Libera contexto
+			// Verifica cancelamento ANTES de chamar stop(), pois stop() cancela o contexto
+			userCancelled := ctx.Err() != nil
+			stop()
 
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Erro crítico na execução: %v\n", err)
 			}
 
 			// Se o usuário cancelou via Ctrl+C, interrompe todo o lote
-			if ctx.Err() != nil {
+			if userCancelled {
 				fmt.Println("\n[!] Cancelamento global detectado. Interrompendo fila de lote...")
 				break
 			}

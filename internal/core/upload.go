@@ -3,9 +3,11 @@ package core
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +20,88 @@ import (
 	"barfimanga/internal/utils"
 	"barfimanga/internal/worker"
 )
+
+// sakuraChapter é o mínimo necessário do JSON do sakuramangas-dl.
+type sakuraChapter struct {
+	Volume int     `json:"volume"`
+	Number float64 `json:"number"`
+}
+
+// loadSakuraVolumes lê um JSON do sakuramangas-dl e retorna mapa número→volume.
+func loadSakuraVolumes(path string) map[float64]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var db struct {
+		Chapters map[string]sakuraChapter `json:"chapters"`
+	}
+	if err := json.Unmarshal(data, &db); err != nil {
+		return nil
+	}
+	m := make(map[float64]string, len(db.Chapters))
+	for _, ch := range db.Chapters {
+		if ch.Volume > 0 {
+			m[ch.Number] = strconv.Itoa(ch.Volume)
+		}
+	}
+	return m
+}
+
+// chapterKey formata a chave do capítulo a partir do nome da pasta.
+// "Cap 019.1 - Título" → "019.1", "Cap 037 - Título" → "037", "Cap 000" → "000"
+func chapterKey(folderName string) string {
+	parts := strings.Fields(folderName)
+	if len(parts) < 2 {
+		return folderName
+	}
+	raw := parts[1]
+	dotIdx := strings.IndexByte(raw, '.')
+	intPart, decPart := raw, ""
+	if dotIdx >= 0 {
+		intPart = raw[:dotIdx]
+		decPart = raw[dotIdx:] // ".1", ".2", ".5"
+	}
+	n, err := strconv.Atoi(intPart)
+	if err != nil {
+		return raw
+	}
+	return fmt.Sprintf("%03d%s", n, decPart)
+}
+
+// chapterNumberFromName extrai o número como float64 para lookup no mapa de volumes.
+func chapterNumberFromName(name string) (float64, bool) {
+	parts := strings.Fields(name)
+	if len(parts) < 2 {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(parts[1], 64)
+	return n, err == nil
+}
+
+// formatChapterTitle monta o título canônico do capítulo.
+// Com volume: "Vol.02 Ch.006 - Compatível"
+// Sem volume (showVol=false ou volume=""): "Ch.006 - Compatível"
+// Sem subtítulo: "Vol.02 Ch.006"
+func formatChapterTitle(folderName, volume string, showVol bool) string {
+	key := chapterKey(folderName)
+
+	subtitle := ""
+	if idx := strings.Index(folderName, " - "); idx >= 0 {
+		subtitle = strings.TrimSpace(folderName[idx+3:])
+	}
+
+	title := "Ch." + key
+	if showVol && volume != "" {
+		if n, err := strconv.Atoi(volume); err == nil {
+			title = fmt.Sprintf("Vol.%02d Ch.%s", n, key)
+		}
+	}
+	if subtitle != "" {
+		title += " - " + subtitle
+	}
+	return title
+}
 
 // logPipeline grava eventos no arquivo bd/pipeline.log
 func logPipeline(msg string) {
@@ -86,9 +170,27 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 	}
 
 	mangaTitle := filepath.Base(dir)
+	if entry.Name != "" {
+		mangaTitle = entry.Name
+	}
 	mangaRoot := dir
 
 	logPipeline(fmt.Sprintf("INICIANDO PIPELINE: Obra '%s' | Dir: %s | SyncOnly: %v", mangaTitle, dir, syncOnly))
+
+	var sakuraVolumes map[float64]string
+	if entry.SakuraMangasDB != "" {
+		sakuraVolumes = loadSakuraVolumes(utils.ToWSLPath(entry.SakuraMangasDB))
+	}
+
+	// showVol=true apenas quando há dados de volume E nem todos são "1"
+	// (vol.1 universal = volume desconhecido/não mapeado na fonte)
+	showVol := false
+	for _, v := range sakuraVolumes {
+		if v != "1" {
+			showVol = true
+			break
+		}
+	}
 
 	// 2. Escaneia sub-diretórios (capítulos) - Pula se for apenas Sync
 	var chapters []string
@@ -117,7 +219,9 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 					fmt.Println(">> [Auto-fill] Pasta de capítulo único detectada. Usando diretório pai como raiz da obra.")
 				}
 				mangaRoot = filepath.Dir(dir)
-				mangaTitle = filepath.Base(mangaRoot)
+				if entry.Name == "" {
+					mangaTitle = filepath.Base(mangaRoot)
+				}
 				chapters = []string{filepath.Base(dir)}
 			}
 		}
@@ -196,7 +300,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 	state := utils.LoadState(dbRoot)
 
-	pool := worker.NewPool(p.host, p.active.Workers, p.active.RateLimit)
+	pool := worker.NewPool(p.host, p.active.Workers, p.active.RateLimit, p.active.MaxRetries)
 
 	for _, ch := range chapters {
 		if state.CompletedChapters[ch] && !forceRebuild {
@@ -267,15 +371,22 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 				}
 			}
 
+			volume := ""
+			if sakuraVolumes != nil {
+				if num, ok := chapterNumberFromName(ch); ok {
+					volume = sakuraVolumes[num]
+				}
+			}
 			chapterMetadata := models.Chapter{
-				Title:       ch,
+				Title:       formatChapterTitle(ch, volume, showVol),
+				Volume:      volume,
 				LastUpdated: fmt.Sprintf("%d", time.Now().Unix()),
 				Groups: map[string][]string{
 					groupName: urls,
 				},
 			}
 
-			newData.Chapters[ch] = chapterMetadata
+			newData.Chapters[chapterKey(ch)] = chapterMetadata
 			existingJson = utils.MergeMetadata(existingJson, newData, "smart")
 
 			if err := utils.SaveJSON(jsonPath, existingJson); err != nil {
@@ -336,7 +447,7 @@ func (p *Pipeline) uploadToGitHub(ctx context.Context, jsonPath, jsonFilename, e
 	// --- GERADOR DE LINKS CUBARI ---
 	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/%s", p.active.GitHubRepo, remotePath)
 	encodedURL := base64.URLEncoding.EncodeToString([]byte(rawURL))
-	cubariURL := fmt.Sprintf("https://cubari.moe/read/gist/%s/", encodedURL)
+	cubariURL := fmt.Sprintf("https://cubari.moe/read/gist/%s", encodedURL)
 
 	linkInfo := fmt.Sprintf("\n==============================\n"+
 		"Nome: %s\nID do JSON: %s\n"+
@@ -379,44 +490,4 @@ func (p *Pipeline) findImages(dir string) ([]string, error) {
 		}
 	}
 	return images, nil
-}
-
-func (p *Pipeline) findCoverImage(mangaPath string) string {
-	coverNames := []string{"cover", "folder", "thumb", "thumbnail", "001", "01", "1"}
-	exts := []string{".jpg", ".jpeg", ".png", ".webp"}
-
-	// 1. Look in root directory for common names
-	for _, name := range coverNames {
-		for _, ext := range exts {
-			candidate := filepath.Join(mangaPath, name+ext)
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
-		}
-	}
-
-	// 2. If no explicit cover found, grab the first image of the first chapter
-	entries, err := os.ReadDir(mangaPath)
-	if err != nil {
-		return ""
-	}
-
-	var chapters []string
-	for _, e := range entries {
-		if e.IsDir() {
-			chapters = append(chapters, e.Name())
-		}
-	}
-
-	if len(chapters) > 0 {
-		utils.NaturalSort(chapters)
-		firstChapterDir := filepath.Join(mangaPath, chapters[0])
-		images, err := p.findImages(firstChapterDir)
-		if err == nil && len(images) > 0 {
-			utils.NaturalSort(images)
-			return images[0]
-		}
-	}
-
-	return ""
 }

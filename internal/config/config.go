@@ -23,6 +23,7 @@ type MangaEntry struct {
 	Cover            string `json:"cover"`
 	Status           string `json:"status"`
 	ScanGroup        string `json:"scan_group,omitempty"`
+	SakuraMangasDB   string `json:"sakura_db,omitempty"`
 }
 
 // Config representa as configurações de um perfil individual.
@@ -36,6 +37,7 @@ type Config struct {
 	HostToken      string                `json:"host_token,omitempty"`
 	Workers        int                   `json:"workers,omitempty"`
 	RateLimit      float64               `json:"rate_limit,omitempty"`
+	MaxRetries     int                   `json:"max_retries,omitempty"`
 	Library        map[string]MangaEntry `json:"-"` // Mantido na memória (mas salvo no bd/library.json)
 }
 
@@ -57,6 +59,7 @@ func GetDefaultConfig() Config {
 		DefaultHost:    "catbox",
 		Workers:        5,
 		RateLimit:      1.0,
+		MaxRetries:     8,
 		GitHubTokenEnv: "PAT_DEFAULT", // Por padrão procura no .env
 		Library:        make(map[string]MangaEntry),
 	}

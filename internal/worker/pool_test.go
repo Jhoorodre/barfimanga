@@ -41,7 +41,7 @@ func (m *mockHost) UploadImage(ctx context.Context, filepath string) (models.Upl
 
 func TestPool_ProcessImages_Success(t *testing.T) {
 	host := &mockHost{shouldFail: false}
-	pool := worker.NewPool(host, 2, 0) // No rate limit, 2 workers
+	pool := worker.NewPool(host, 2, 0, 1) // No rate limit, 2 workers
 
 	images := []string{"img1.jpg", "img2.jpg", "img3.jpg"}
 	tracker := &progress.ProgressTracker{Total: int64(len(images))}
@@ -73,7 +73,7 @@ func TestPool_ProcessImages_Success(t *testing.T) {
 
 func TestPool_ProcessImages_Failure(t *testing.T) {
 	host := &mockHost{shouldFail: true}
-	pool := worker.NewPool(host, 1, 0)
+	pool := worker.NewPool(host, 1, 0, 1)
 
 	images := []string{"ok1.jpg", "fail.jpg", "ok2.jpg"}
 
@@ -99,7 +99,7 @@ func TestPool_ProcessImages_Failure(t *testing.T) {
 func TestPool_RateLimiting(t *testing.T) {
 	host := &mockHost{shouldFail: false}
 	// Limit to 10 requests per second (100ms per request)
-	pool := worker.NewPool(host, 5, 10.0)
+	pool := worker.NewPool(host, 5, 10.0, 1)
 
 	images := []string{"1", "2", "3"}
 

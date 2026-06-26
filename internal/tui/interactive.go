@@ -652,6 +652,9 @@ func editMangaEntry(entry *config.MangaEntry) error {
 			huh.NewInput().Title("Scan Group (Opcional)").
 				Description("Grupo responsável. Ex: 'Eremita Scan'. Deixe vazio para usar o padrão do perfil.").
 				Value(&entry.ScanGroup),
+			huh.NewInput().Title("Metadados Sakura (Opcional)").
+				Description("Caminho para o .json do sakuramangas-dl. Preenche volumes automaticamente por capítulo.").
+				Value(&entry.SakuraMangasDB),
 		),
 	)
 

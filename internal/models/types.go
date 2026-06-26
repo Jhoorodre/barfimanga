@@ -8,15 +8,6 @@ type UploadResult struct {
 	Error    string
 }
 
-// ChapterUploadResult representa o resultado do upload de um capítulo inteiro.
-type ChapterUploadResult struct {
-	ChapterName   string
-	AlbumURL      string
-	ImageURLs     []string
-	FailedUploads []string
-	Success       bool
-}
-
 // Chapter representa os metadados de um capítulo no reader.json.
 type Chapter struct {
 	Title       string              `json:"title"`
@@ -34,17 +25,4 @@ type ReaderJSON struct {
 	Cover       string             `json:"cover"`
 	Status      string             `json:"status"`
 	Chapters    map[string]Chapter `json:"chapters"`
-}
-
-// OrderedReaderJSON is an alternative representation utilized strictly for custom marshaling
-// to ensure the chapters map keys are printed in descending order in the final JSON string.
-// Go maps are unordered, so we use a map alias with custom marshaling locally when saving.
-type OrderedReaderJSON struct {
-	Title       string      `json:"title"`
-	Description string      `json:"description"`
-	Artist      string      `json:"artist"`
-	Author      string      `json:"author"`
-	Cover       string      `json:"cover"`
-	Status      string      `json:"status"`
-	Chapters    interface{} `json:"chapters"` // Will be injected as an ordered representation
 }
