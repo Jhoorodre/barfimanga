@@ -341,7 +341,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 		utils.NaturalSort(images)
 		if !quiet {
-			fmt.Printf("   Iniciando upload de %d imagens... (Host: %s, Workers: %d)\n", len(images), p.host.Name(), p.active.Workers)
+			fmt.Printf("   Processando %d imagens... (Host: %s, Workers: %d)\n", len(images), p.host.Name(), p.active.Workers)
 		}
 
 		tracker := &progress.ProgressTracker{Total: int64(len(images))}
@@ -365,9 +365,13 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		}
 
 		var urls []string
+		var fromCache int
 		for _, res := range results {
 			if res.Success {
 				urls = append(urls, res.URL)
+				if res.Error == "from_cache" {
+					fromCache++
+				}
 			} else {
 				fmt.Fprintf(os.Stderr, "   [!] Falha isolada (%s): %s\n", res.Filename, res.Error)
 			}
@@ -375,7 +379,11 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 		if len(urls) > 0 {
 			if !quiet {
-				fmt.Printf("   -> Sucesso: %d/%d\n", len(urls), len(images))
+				cacheInfo := ""
+				if fromCache > 0 {
+					cacheInfo = fmt.Sprintf(" (%d do cache)", fromCache)
+				}
+				fmt.Printf("   -> Sucesso: %d/%d%s\n", len(urls), len(images), cacheInfo)
 			} else {
 				for _, u := range urls {
 					fmt.Println(u)
