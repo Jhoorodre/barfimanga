@@ -473,13 +473,36 @@ func (p *Pipeline) uploadToGitHub(ctx context.Context, jsonPath, jsonFilename, e
 	}
 
 	linksFile := filepath.Join("bd", "cubari_links.txt")
-	f, err := os.OpenFile(linksFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		f.WriteString(linkInfo)
-		f.Close()
-	}
+	upsertCubariLink(linksFile, mangaTitle, linkInfo)
 
 	return nil
+}
+
+// upsertCubariLink atualiza ou insere o bloco do mangá no arquivo de links.
+func upsertCubariLink(linksFile, mangaTitle, linkInfo string) {
+	const sep = "=============================="
+	existing, _ := os.ReadFile(linksFile)
+
+	parts := strings.Split(string(existing), sep)
+	var kept []string
+	for _, part := range parts {
+		trimmed := strings.Trim(part, "\n")
+		if trimmed == "" {
+			continue
+		}
+		if strings.Contains(trimmed, "Nome: "+mangaTitle+"\n") {
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+
+	var sb strings.Builder
+	for _, block := range kept {
+		sb.WriteString(sep + "\n" + block + "\n" + sep + "\n\n")
+	}
+	sb.WriteString(strings.TrimLeft(linkInfo, "\n"))
+
+	_ = os.WriteFile(linksFile, []byte(sb.String()), 0644)
 }
 
 func (p *Pipeline) findImages(dir string) ([]string, error) {

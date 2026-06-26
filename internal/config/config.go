@@ -66,10 +66,9 @@ func GetDefaultConfig() Config {
 }
 
 func ConfigDir() (string, error) {
-	// Usar o diretório do projeto /bd
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "/home/jhonnatta/projetos/BarfiManga/bd", nil
+		return "", err
 	}
 	return filepath.Join(cwd, "bd"), nil
 }

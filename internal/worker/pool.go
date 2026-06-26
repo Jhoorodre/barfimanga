@@ -28,6 +28,9 @@ func NewPool(host hosts.Host, workers int, requestsPerSecond float64, maxRetries
 	} else {
 		limit = rate.Inf
 	}
+	if workers <= 0 {
+		workers = 5
+	}
 	if maxRetries <= 0 {
 		maxRetries = 8
 	}

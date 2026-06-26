@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"barfimanga/internal/config"
@@ -109,8 +110,13 @@ func (h *CatboxHost) doUpload(ctx context.Context, fpath string) (models.UploadR
 		return models.UploadResult{}, fmt.Errorf("erro do servidor %d: %s", resp.StatusCode, string(body))
 	}
 
+	url := strings.TrimSpace(string(body))
+	if !strings.HasPrefix(url, "https://") {
+		return models.UploadResult{Filename: filepath.Base(fpath), Success: false, Error: url}, fmt.Errorf("catbox: %s", url)
+	}
+
 	return models.UploadResult{
-		URL:      string(body),
+		URL:      url,
 		Filename: filepath.Base(fpath),
 		Success:  true,
 	}, nil
