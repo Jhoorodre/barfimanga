@@ -90,6 +90,9 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 								Success:  true,
 								Error:    "from_cache",
 							}
+							if tracker != nil {
+								tracker.FromCache.Add(1)
+							}
 						}
 					}
 				}

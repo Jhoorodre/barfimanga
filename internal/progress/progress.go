@@ -12,8 +12,9 @@ import (
 )
 
 type ProgressTracker struct {
-	Total int64
-	Done  atomic.Int64
+	Total     int64
+	Done      atomic.Int64
+	FromCache atomic.Int64
 }
 
 func (t *ProgressTracker) Increment() {
@@ -64,7 +65,9 @@ func (p *plainProgress) Start(total int64, tracker *ProgressTracker) {
 			case <-p.done:
 				return
 			case <-p.ticker.C:
-				fmt.Fprintf(os.Stderr, "Progresso: %d/%d\n", p.tracker.Done.Load(), p.tracker.Total)
+				cached := p.tracker.FromCache.Load()
+				done := p.tracker.Done.Load()
+				fmt.Fprintf(os.Stderr, "Progresso: %d/%d (cache:%d upload:%d)\n", done, p.tracker.Total, cached, done-cached)
 			}
 		}
 	}()
@@ -75,7 +78,9 @@ func (p *plainProgress) Finish(success bool) {
 		p.ticker.Stop()
 		close(p.done)
 	}
-	fmt.Fprintf(os.Stderr, "Finalizado: %d/%d\n", p.tracker.Done.Load(), p.tracker.Total)
+	cached := p.tracker.FromCache.Load()
+	done := p.tracker.Done.Load()
+	fmt.Fprintf(os.Stderr, "Finalizado: %d/%d (cache:%d upload:%d)\n", done, p.tracker.Total, cached, done-cached)
 }
 
 // -- Bar Progress --
@@ -112,11 +117,12 @@ func (p *barProgress) Start(total int64, tracker *ProgressTracker) {
 }
 
 func (p *barProgress) render() {
-	done := float64(p.tracker.Done.Load())
-	total := float64(p.tracker.Total)
+	done := p.tracker.Done.Load()
+	cached := p.tracker.FromCache.Load()
+	total := p.tracker.Total
 	var percent float64
 	if total > 0 {
-		percent = done / total
+		percent = float64(done) / float64(total)
 	}
 
 	width, _, err := term.GetSize(int(os.Stderr.Fd()))
@@ -124,16 +130,15 @@ func (p *barProgress) render() {
 		width = 80
 	}
 
-	p.prog.Width = width - 30
+	// "c:119|u:4 38/65 " → ~18 chars; barra preenche o resto
+	info := fmt.Sprintf(" c:%d|u:%d %d/%d ", cached, done-cached, done, total)
+	p.prog.Width = width - len(info)
 	if p.prog.Width < 10 {
 		p.prog.Width = 10
 	}
 
 	barStr := p.prog.ViewAs(percent)
-	text := fmt.Sprintf(" %d/%d ", int64(done), int64(total))
-
-	// \r clears the current line visually if followed by \x1b[K
-	fmt.Fprintf(os.Stderr, "\r\033[K%s%s", barStr, text)
+	fmt.Fprintf(os.Stderr, "\r\033[K%s%s", barStr, info)
 }
 
 func (p *barProgress) Finish(success bool) {
