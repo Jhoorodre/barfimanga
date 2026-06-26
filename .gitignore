@@ -32,6 +32,9 @@ go.work.sum
 # .vscode/
 manga-upload.bat
 GEMINI.md
+CLAUDE.md
+NOTA.txt
+tsue_to_tsurugi_no_wistoria.json
 
 # Binaries
 bin/
