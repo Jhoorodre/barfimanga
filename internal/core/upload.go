@@ -185,6 +185,9 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			sakuraDBPath = filepath.Join(sakuraDBPath, filename)
 		}
 		sakuraVolumes = loadSakuraVolumes(sakuraDBPath)
+		if sakuraVolumes == nil && !quiet {
+			fmt.Fprintf(os.Stderr, "[!] sakura_db configurado mas arquivo não encontrado: %s\n    Capítulos serão processados sem informação de volume.\n", sakuraDBPath)
+		}
 	}
 
 	// showVol=true apenas quando há dados de volume E nem todos são "1"
