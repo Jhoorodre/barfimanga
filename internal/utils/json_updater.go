@@ -84,10 +84,19 @@ func SaveJSON(path string, data *models.ReaderJSON) error {
 	return os.WriteFile(path, buffer.Bytes(), 0644)
 }
 
-// findChapterByTitle verifica se um capítulo com o mesmo título já existe.
+// normTitle extrai o subtítulo após " - " para comparação independente de prefixo (Ch.xxx vs Cap xxx).
+func normTitle(t string) string {
+	if idx := strings.Index(t, " - "); idx >= 0 {
+		return strings.TrimSpace(t[idx+3:])
+	}
+	return strings.TrimSpace(t)
+}
+
+// findChapterByTitle verifica se um capítulo com o mesmo subtítulo já existe.
 func findChapterByTitle(chapters map[string]models.Chapter, title string) string {
+	norm := normTitle(title)
 	for k, v := range chapters {
-		if strings.TrimSpace(v.Title) == strings.TrimSpace(title) {
+		if normTitle(v.Title) == norm {
 			return k
 		}
 	}
@@ -166,15 +175,15 @@ func MergeMetadata(existing *models.ReaderJSON, newData *models.ReaderJSON, mode
 
 	for _, key := range newChTitles {
 		newCh := newData.Chapters[key]
-		// Tenta primeiro pela chave numérica; se não achar, busca por título (compatibilidade com formato antigo)
-		if _, exists := merged.Chapters[key]; exists {
-			merged.Chapters[key] = newCh
-		} else if existingKey := findChapterByTitle(merged.Chapters, newCh.Title); existingKey != "" {
+		// Remove TODAS as entradas stale com mesmo subtítulo mas chave diferente
+		for {
+			existingKey := findChapterByTitle(merged.Chapters, newCh.Title)
+			if existingKey == "" || existingKey == key {
+				break
+			}
 			delete(merged.Chapters, existingKey)
-			merged.Chapters[key] = newCh
-		} else {
-			merged.Chapters[key] = newCh
 		}
+		merged.Chapters[key] = newCh
 	}
 
 	return merged

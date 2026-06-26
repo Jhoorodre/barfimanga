@@ -179,7 +179,12 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 	var sakuraVolumes map[float64]string
 	if entry.SakuraMangasDB != "" {
-		sakuraVolumes = loadSakuraVolumes(utils.ToWSLPath(entry.SakuraMangasDB))
+		sakuraDBPath := utils.ToWSLPath(entry.SakuraMangasDB)
+		if info, err := os.Stat(sakuraDBPath); err == nil && info.IsDir() {
+			filename := strings.ToLower(strings.ReplaceAll(mangaTitle, " ", "_")) + ".json"
+			sakuraDBPath = filepath.Join(sakuraDBPath, filename)
+		}
+		sakuraVolumes = loadSakuraVolumes(sakuraDBPath)
 	}
 
 	// showVol=true apenas quando há dados de volume E nem todos são "1"
@@ -263,6 +268,11 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		}
 	}
 
+	// Rebuild: preserva metadados mas reconstrói capítulos do zero
+	if forceRebuild && !syncOnly {
+		existingJson.Chapters = make(map[string]models.Chapter)
+	}
+
 	// Se for APENAS Sync, atualiza metadados do cabeçalho e sobe pro GitHub
 	if syncOnly {
 		logPipeline(fmt.Sprintf("[Fast-Sync] Atualizando metadados de '%s'", mangaTitle))
@@ -338,7 +348,8 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		progUI := progress.NewProgress(quiet)
 		progUI.Start(int64(len(images)), tracker)
 
-		results, err := pool.ProcessImages(ctx, images, tracker, uploadCache, forceRebuild)
+		// Rebuild reconstrói o JSON do zero mas ainda usa cache de imagens para evitar re-uploads
+		results, err := pool.ProcessImages(ctx, images, tracker, uploadCache, false)
 		progUI.Finish(err == nil)
 
 		if ctx.Err() != nil {
@@ -445,8 +456,9 @@ func (p *Pipeline) uploadToGitHub(ctx context.Context, jsonPath, jsonFilename, e
 	logPipeline("SUCESSO GitHub Sync")
 
 	// --- GERADOR DE LINKS CUBARI ---
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/%s", p.active.GitHubRepo, remotePath)
-	encodedURL := base64.URLEncoding.EncodeToString([]byte(rawURL))
+	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", p.active.GitHubRepo, p.active.GitHubBranch, remotePath)
+	cubariPath := fmt.Sprintf("raw/%s/refs/heads/%s/%s", p.active.GitHubRepo, p.active.GitHubBranch, remotePath)
+	encodedURL := base64.RawURLEncoding.EncodeToString([]byte(cubariPath))
 	cubariURL := fmt.Sprintf("https://cubari.moe/read/gist/%s", encodedURL)
 
 	linkInfo := fmt.Sprintf("\n==============================\n"+
@@ -454,7 +466,7 @@ func (p *Pipeline) uploadToGitHub(ctx context.Context, jsonPath, jsonFilename, e
 		"Link Raw GitHub: %s\n"+
 		"Link Cubari: %s\n"+
 		"==============================\n",
-		mangaTitle, jsonFilename, rawURL, cubariURL)
+		mangaTitle, effectiveID, rawURL, cubariURL)
 
 	if !quiet {
 		fmt.Println(linkInfo)
