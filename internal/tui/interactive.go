@@ -765,6 +765,7 @@ func editProfile(mCfg *config.MultiConfig, name string) error {
 					huh.NewOption("Pixeldrain", "pixeldrain"),
 					huh.NewOption("ImgPile", "imgpile"),
 					huh.NewOption("ImgBox", "imgbox"),
+					huh.NewOption("Google Drive (lh3)", "gdrive"),
 				).
 				Value(&cfg.DefaultHost),
 			huh.NewInput().Title("Host Token (API Key / Client-ID)").Value(&cfg.HostToken).EchoMode(huh.EchoModePassword),

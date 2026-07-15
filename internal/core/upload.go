@@ -152,6 +152,8 @@ func NewPipeline(mCfg config.MultiConfig) (*Pipeline, error) {
 		h = hosts.NewGofileHost(active)
 	case "imgbox":
 		h = hosts.NewImgboxHost(active)
+	case "gdrive":
+		h = hosts.NewGDriveHost(active)
 	default:
 		return nil, fmt.Errorf("host '%s' não suportado", active.DefaultHost)
 	}
@@ -306,6 +308,19 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		Cover:       entry.Cover,
 		Status:      entry.Status,
 		Chapters:    make(map[string]models.Chapter),
+	}
+
+	// Auto-detecta cover na raiz da obra se não configurada
+	if newData.Cover == "" {
+		for _, ext := range []string{"cover.jpg", "cover.jpeg", "cover.png", "cover.webp"} {
+			coverPath := filepath.Join(dir, ext)
+			if _, err := os.Stat(coverPath); err == nil {
+				if res, err := p.host.UploadImage(ctx, coverPath); err == nil && res.Success {
+					newData.Cover = res.URL
+				}
+				break
+			}
+		}
 	}
 
 	uploadCache := cache.NewCache(dbRoot)
