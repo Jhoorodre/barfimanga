@@ -635,7 +635,7 @@ func editMangaEntry(entry *config.MangaEntry) error {
 		),
 		huh.NewGroup(
 			huh.NewText().Title("Descrição").
-				Description("A sinopse do mangá. Aperte Enter para pular linha. Tab para avançar.").
+				Description("A sinopse do mangá. Enter avança de campo — use Alt+Enter/Ctrl+J p/ linha, ou Ctrl+E p/ colar num editor externo.").
 				Value(&entry.Description),
 			huh.NewInput().Title("Autor").
 				Description("Nome do autor da história. Ex: 'Nihei Tsutomu'").
