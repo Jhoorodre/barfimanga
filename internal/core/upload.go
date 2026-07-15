@@ -48,14 +48,29 @@ func loadSakuraVolumes(path string) map[float64]string {
 	return m
 }
 
+// numberToken acha o token que contém o número do capítulo, aceitando tanto
+// "65 - Título" (número no primeiro token) quanto "Cap 065 - Título"
+// (prefixo textual seguido do número).
+func numberToken(parts []string) (string, bool) {
+	if len(parts) == 0 {
+		return "", false
+	}
+	if _, err := strconv.ParseFloat(parts[0], 64); err == nil {
+		return parts[0], true
+	}
+	if len(parts) >= 2 {
+		return parts[1], true
+	}
+	return "", false
+}
+
 // chapterKey formata a chave do capítulo a partir do nome da pasta.
-// "Cap 019.1 - Título" → "019.1", "Cap 037 - Título" → "037", "Cap 000" → "000"
+// "Cap 019.1 - Título" → "019.1", "65 - Título" → "065", "Cap 000" → "000"
 func chapterKey(folderName string) string {
-	parts := strings.Fields(folderName)
-	if len(parts) < 2 {
+	raw, ok := numberToken(strings.Fields(folderName))
+	if !ok {
 		return folderName
 	}
-	raw := parts[1]
 	dotIdx := strings.IndexByte(raw, '.')
 	intPart, decPart := raw, ""
 	if dotIdx >= 0 {
@@ -71,11 +86,11 @@ func chapterKey(folderName string) string {
 
 // chapterNumberFromName extrai o número como float64 para lookup no mapa de volumes.
 func chapterNumberFromName(name string) (float64, bool) {
-	parts := strings.Fields(name)
-	if len(parts) < 2 {
+	raw, ok := numberToken(strings.Fields(name))
+	if !ok {
 		return 0, false
 	}
-	n, err := strconv.ParseFloat(parts[1], 64)
+	n, err := strconv.ParseFloat(raw, 64)
 	return n, err == nil
 }
 
