@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,10 +77,16 @@ func SanitizeFilename(name string, isFile bool) string {
 
 // ToWSLPath converte um caminho Windows (ex: D:\...) para o formato WSL (/mnt/d/...)
 // Se o usuário passar caminho com aspas ou caminho de rede (\\wsl.localhost\...), ele limpa.
+// Só faz sentido para o binário Linux/WSL: no .exe nativo do Windows, "D:\..." já é o
+// caminho certo e "/mnt/d/..." não existe, então aqui só limpa aspas e retorna como está.
 func ToWSLPath(path string) string {
 	// 1. Remove aspas geradas pelo Drag and Drop do Windows
 	path = strings.Trim(path, "\"")
 	path = strings.Trim(path, "'")
+
+	if runtime.GOOS == "windows" {
+		return path
+	}
 
 	// 2. Resolve caminhos de rede do WSL (ex: \\wsl.localhost\Ubuntu-22.04\home\...)
 	if strings.HasPrefix(path, `\\wsl.localhost\`) || strings.HasPrefix(path, `\\wsl$\`) {
