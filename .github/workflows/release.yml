@@ -30,13 +30,13 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            asset: barfi-linux-amd64
+            asset: barfimanga-linux-amd64
           - goos: linux
             goarch: arm64
-            asset: barfi-linux-arm64
+            asset: barfimanga-linux-arm64
           - goos: windows
             goarch: amd64
-            asset: barfi-windows-amd64.exe
+            asset: barfimanga-windows-amd64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
