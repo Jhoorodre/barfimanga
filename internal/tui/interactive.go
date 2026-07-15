@@ -13,6 +13,7 @@ import (
 	"barfimanga/internal/config"
 	"barfimanga/internal/utils"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 	"github.com/joho/godotenv"
 )
@@ -612,6 +613,13 @@ func manageLibrary(mCfg *config.MultiConfig) error {
 }
 
 func editMangaEntry(entry *config.MangaEntry) error {
+	// Descrição é multi-linha: tira "enter" do avanço de campo (deixa só "tab")
+	// para colar textos com várias linhas não espalhar pelos campos seguintes.
+	km := huh.NewDefaultKeyMap()
+	km.Text.Next = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next"))
+	km.Text.Submit = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "submit"))
+	km.Text.NewLine = key.NewBinding(key.WithKeys("enter", "alt+enter", "ctrl+j"), key.WithHelp("enter", "new line"))
+
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().Title("Nome da Obra (Exibição)").
@@ -635,7 +643,7 @@ func editMangaEntry(entry *config.MangaEntry) error {
 		),
 		huh.NewGroup(
 			huh.NewText().Title("Descrição").
-				Description("A sinopse do mangá. Enter avança de campo — use Alt+Enter/Ctrl+J p/ linha, ou Ctrl+E p/ colar num editor externo.").
+				Description("A sinopse do mangá. Enter pula linha, Tab avança. Ctrl+E abre editor externo (bom p/ colar texto grande).").
 				Value(&entry.Description),
 			huh.NewInput().Title("Autor").
 				Description("Nome do autor da história. Ex: 'Nihei Tsutomu'").
@@ -656,7 +664,7 @@ func editMangaEntry(entry *config.MangaEntry) error {
 				Description("Caminho para o .json do sakuramangas-dl. Preenche volumes automaticamente por capítulo.").
 				Value(&entry.SakuraMangasDB),
 		),
-	)
+	).WithKeyMap(km)
 
 	return form.Run()
 }
