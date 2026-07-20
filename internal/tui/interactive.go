@@ -815,6 +815,9 @@ func editProfile(mCfg *config.MultiConfig, name string) error {
 		}
 		envMap[cfg.GitHubTokenEnv] = newPat
 		if err := godotenv.Write(envMap, envPath); err == nil {
+			// godotenv.Write usa os.Create (permissão do SO, ex: 644) — restringe
+			// pra 0600 igual profiles.json/library.json, já que aqui vai um PAT em texto puro.
+			_ = os.Chmod(envPath, 0600)
 			fmt.Printf("\n[+] Token atualizado e salvo com sucesso no arquivo %s!\n", envPath)
 			time.Sleep(1500 * time.Millisecond)
 		} else {
