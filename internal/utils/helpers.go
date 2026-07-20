@@ -99,6 +99,10 @@ func ToWSLPath(path string) string {
 	}
 
 	// 3. Verifica se parece um caminho Windows tradicional (ex: C:\ ou D:\)
+	// Convenção específica de WSL (DrvFs monta cada drive em /mnt/<letra>). O servidor
+	// Linux atual não roda em WSL e não tem esse mount — chega aqui só se alguém digitar
+	// um caminho "C:\..." direto numa sessão rodando no servidor, o que hoje não deveria
+	// acontecer (o barfimanga.bat já traduz Z:\... para /home/jhoorodr/... antes do SSH).
 	if len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
 		drive := strings.ToLower(string(path[0]))
 		remaining := strings.ReplaceAll(path[3:], "\\", "/")

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -43,14 +44,25 @@ type adcCreds struct {
 func NewGDriveHost(cfg config.Config) *GDriveHost {
 	credPath := cfg.HostToken
 	if credPath == "" {
-		home, _ := os.UserHomeDir()
-		credPath = filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+		credPath = defaultADCPath()
 	}
 	return &GDriveHost{
 		credPath:    credPath,
 		client:      &http.Client{Timeout: 30 * time.Second},
 		folderCache: make(map[string]string),
 	}
+}
+
+// defaultADCPath replica onde o `gcloud` guarda as Application Default Credentials
+// em cada SO: %APPDATA%\gcloud\... no Windows, ~/.config/gcloud/... em Linux/Mac.
+func defaultADCPath() string {
+	if runtime.GOOS == "windows" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			return filepath.Join(appData, "gcloud", "application_default_credentials.json")
+		}
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
 }
 
 func (h *GDriveHost) Name() string { return "Google Drive" }
