@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -131,8 +132,20 @@ func LoadConfig() (MultiConfig, error) {
 
 		// Puxa o PAT do .env baseado na string referenciada no JSON
 		if prof.GitHubTokenEnv != "" {
-			prof.GitHubToken = os.Getenv(prof.GitHubTokenEnv)
+			if pat, err := DecryptToken(os.Getenv(prof.GitHubTokenEnv)); err == nil {
+				prof.GitHubToken = pat
+			} else {
+				fmt.Fprintf(os.Stderr, "barfimanga: aviso: PAT do perfil %q não pôde ser descriptografado (mudou de máquina?) — reconfigure em Gerenciar Perfis\n", name)
+			}
 		}
+
+		if dec, err := DecryptToken(prof.HostToken); err == nil {
+			prof.HostToken = dec
+		} else {
+			fmt.Fprintf(os.Stderr, "barfimanga: aviso: host_token do perfil %q não pôde ser descriptografado (mudou de máquina?) — reconfigure em Gerenciar Perfis\n", name)
+			prof.HostToken = ""
+		}
+
 		mCfg.Profiles[name] = prof
 	}
 
@@ -153,17 +166,23 @@ func SaveConfig(mCfg MultiConfig) error {
 	}
 	os.MkdirAll(dir, 0700)
 
-	// 1. Extrair Library para salvar no library.json
+	// 1. Extrair Library para salvar no library.json e cifrar HostToken numa
+	// cópia (mCfg em memória continua com o token em texto puro pro resto da sessão)
 	libData := LibraryData{
 		Profiles: make(map[string]map[string]MangaEntry),
 	}
+	safe := MultiConfig{ActiveProfile: mCfg.ActiveProfile, Profiles: make(map[string]Config, len(mCfg.Profiles))}
 	for name, prof := range mCfg.Profiles {
 		libData.Profiles[name] = prof.Library
+		if enc, err := EncryptToken(prof.HostToken); err == nil {
+			prof.HostToken = enc
+		}
+		safe.Profiles[name] = prof
 	}
 
 	// 2. Salva profiles.json (O struct ignora GitHubToken e Library automaticamente)
 	pathProfiles := filepath.Join(dir, "profiles.json")
-	pData, err := json.MarshalIndent(mCfg, "", "  ")
+	pData, err := json.MarshalIndent(safe, "", "  ")
 	if err != nil {
 		return err
 	}

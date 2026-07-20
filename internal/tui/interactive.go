@@ -813,10 +813,14 @@ func editProfile(mCfg *config.MultiConfig, name string) error {
 		if err != nil {
 			envMap = make(map[string]string)
 		}
-		envMap[cfg.GitHubTokenEnv] = newPat
+		enc, err := config.EncryptToken(newPat)
+		if err != nil {
+			enc = newPat // fallback: melhor salvar em texto puro do que perder o token
+		}
+		envMap[cfg.GitHubTokenEnv] = enc
 		if err := godotenv.Write(envMap, envPath); err == nil {
 			// godotenv.Write usa os.Create (permissão do SO, ex: 644) — restringe
-			// pra 0600 igual profiles.json/library.json, já que aqui vai um PAT em texto puro.
+			// pra 0600 igual profiles.json/library.json, já que aqui vai o PAT cifrado.
 			_ = os.Chmod(envPath, 0600)
 			fmt.Printf("\n[+] Token atualizado e salvo com sucesso no arquivo %s!\n", envPath)
 			time.Sleep(1500 * time.Millisecond)
