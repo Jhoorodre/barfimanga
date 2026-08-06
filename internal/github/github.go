@@ -14,14 +14,16 @@ import (
 )
 
 type Client struct {
-	config config.Config
-	client *http.Client
+	config  config.Config
+	client  *http.Client
+	baseURL string // apontável pra um servidor de teste; produção usa api.github.com
 }
 
 func NewClient(cfg config.Config) *Client {
 	return &Client{
-		config: cfg,
-		client: &http.Client{Timeout: 30 * time.Second},
+		config:  cfg,
+		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL: "https://api.github.com",
 	}
 }
 
@@ -31,12 +33,39 @@ type FileResponse struct {
 }
 
 // UploadJSON atualiza ou cria o arquivo JSON no repositório final do mangá.
+// Tenta novamente com backoff exponencial em caso de falha de rede — evita
+// perder um lote inteiro de upload de imagens por causa de um blip de
+// conexão só no passo final de sincronização com o GitHub.
 func (c *Client) UploadJSON(ctx context.Context, filePath string, content []byte, message string) error {
 	if c.config.GitHubToken == "" || c.config.GitHubRepo == "" {
 		return fmt.Errorf("github_token ou github_repo ausente nas configurações")
 	}
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/contents/%s", c.config.GitHubRepo, filePath)
+	maxRetries := c.config.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 8
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		lastErr = c.uploadOnce(ctx, filePath, content, message)
+		if lastErr == nil {
+			return nil
+		}
+		if attempt < maxRetries {
+			backoff := time.Duration(1<<uint(attempt)) * time.Second
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return fmt.Errorf("falha após %d tentativas: %w", maxRetries, lastErr)
+}
+
+func (c *Client) uploadOnce(ctx context.Context, filePath string, content []byte, message string) error {
+	url := fmt.Sprintf("%s/repos/%s/contents/%s", c.baseURL, c.config.GitHubRepo, filePath)
 
 	// 1. Obtém SHA do arquivo (se ele já existir no Git)
 	sha, _ := c.getFileSHA(ctx, url)
