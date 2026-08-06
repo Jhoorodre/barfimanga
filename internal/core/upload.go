@@ -153,8 +153,8 @@ func NewPipeline(mCfg config.MultiConfig) (*Pipeline, error) {
 		h = hosts.NewImgurHost(active)
 	case "imgbb":
 		h = hosts.NewImgBBHost(active)
-	case "imagechest":
-		h = hosts.NewImageChestHost(active)
+	case "imgchest":
+		h = hosts.NewImgChestHost(active)
 	case "imghippo":
 		h = hosts.NewImgHippoHost(active)
 	case "lensdump":

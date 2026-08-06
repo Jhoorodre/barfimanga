@@ -767,7 +767,7 @@ func editProfile(mCfg *config.MultiConfig, name string) error {
 					huh.NewOption("Catbox", "catbox"),
 					huh.NewOption("Imgur", "imgur"),
 					huh.NewOption("ImgBB", "imgbb"),
-					huh.NewOption("ImageChest", "imagechest"),
+					huh.NewOption("ImgChest", "imgchest"),
 					huh.NewOption("ImgHippo", "imghippo"),
 					huh.NewOption("Lensdump", "lensdump"),
 					huh.NewOption("Pixeldrain", "pixeldrain"),
