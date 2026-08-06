@@ -33,31 +33,6 @@ func (h *ImgHippoHost) Name() string {
 	return "ImgHippo"
 }
 
-func (h *ImgHippoHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
-	maxRetries := 3
-	var lastErr error
-
-	for i := 0; i < maxRetries; i++ {
-		res, err := h.doUpload(ctx, fpath)
-		if err == nil {
-			return res, nil
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			return models.UploadResult{}, ctx.Err()
-		case <-time.After(time.Duration(1<<i) * 2 * time.Second):
-		}
-	}
-
-	return models.UploadResult{
-		Filename: filepath.Base(fpath),
-		Success:  false,
-		Error:    lastErr.Error(),
-	}, lastErr
-}
-
 type imgHippoResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
@@ -66,7 +41,9 @@ type imgHippoResponse struct {
 	Message string `json:"message"`
 }
 
-func (h *ImgHippoHost) doUpload(ctx context.Context, fpath string) (models.UploadResult, error) {
+// UploadImage faz upload pro ImgHippo. Uma tentativa só — retry e backoff já
+// são responsabilidade do worker.Pool (que envolve todo host igual).
+func (h *ImgHippoHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
 	if h.config.HostToken == "" {
 		return models.UploadResult{}, fmt.Errorf("host_token (API Key) não configurado para ImgHippo")
 	}

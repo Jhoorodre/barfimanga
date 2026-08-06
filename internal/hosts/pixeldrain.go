@@ -32,38 +32,15 @@ func (h *PixeldrainHost) Name() string {
 	return "Pixeldrain"
 }
 
-func (h *PixeldrainHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
-	maxRetries := 3
-	var lastErr error
-
-	for i := 0; i < maxRetries; i++ {
-		res, err := h.doUpload(ctx, fpath)
-		if err == nil {
-			return res, nil
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			return models.UploadResult{}, ctx.Err()
-		case <-time.After(time.Duration(1<<i) * 2 * time.Second):
-		}
-	}
-
-	return models.UploadResult{
-		Filename: filepath.Base(fpath),
-		Success:  false,
-		Error:    lastErr.Error(),
-	}, lastErr
-}
-
 type pixeldrainResponse struct {
 	Success bool   `json:"success"`
 	ID      string `json:"id"`
 	Message string `json:"message"`
 }
 
-func (h *PixeldrainHost) doUpload(ctx context.Context, fpath string) (models.UploadResult, error) {
+// UploadImage faz upload pro Pixeldrain. Uma tentativa só — retry e backoff já
+// são responsabilidade do worker.Pool (que envolve todo host igual).
+func (h *PixeldrainHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
 	file, err := os.Open(fpath)
 	if err != nil {
 		return models.UploadResult{}, err

@@ -32,31 +32,6 @@ func (h *LensdumpHost) Name() string {
 	return "Lensdump"
 }
 
-func (h *LensdumpHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
-	maxRetries := 3
-	var lastErr error
-
-	for i := 0; i < maxRetries; i++ {
-		res, err := h.doUpload(ctx, fpath)
-		if err == nil {
-			return res, nil
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			return models.UploadResult{}, ctx.Err()
-		case <-time.After(time.Duration(1<<i) * 2 * time.Second):
-		}
-	}
-
-	return models.UploadResult{
-		Filename: filepath.Base(fpath),
-		Success:  false,
-		Error:    lastErr.Error(),
-	}, lastErr
-}
-
 type lensdumpResponse struct {
 	StatusCode int `json:"status_code"`
 	Image      struct {
@@ -67,7 +42,9 @@ type lensdumpResponse struct {
 	} `json:"error"`
 }
 
-func (h *LensdumpHost) doUpload(ctx context.Context, fpath string) (models.UploadResult, error) {
+// UploadImage faz upload pro Lensdump. Uma tentativa só — retry e backoff já
+// são responsabilidade do worker.Pool (que envolve todo host igual).
+func (h *LensdumpHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
 	file, err := os.Open(fpath)
 	if err != nil {
 		return models.UploadResult{}, err

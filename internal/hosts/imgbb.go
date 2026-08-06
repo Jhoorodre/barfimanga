@@ -33,31 +33,6 @@ func (h *ImgBBHost) Name() string {
 	return "ImgBB"
 }
 
-func (h *ImgBBHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
-	maxRetries := 3
-	var lastErr error
-
-	for i := 0; i < maxRetries; i++ {
-		res, err := h.doUpload(ctx, fpath)
-		if err == nil {
-			return res, nil
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			return models.UploadResult{}, ctx.Err()
-		case <-time.After(time.Duration(1<<i) * 2 * time.Second):
-		}
-	}
-
-	return models.UploadResult{
-		Filename: filepath.Base(fpath),
-		Success:  false,
-		Error:    lastErr.Error(),
-	}, lastErr
-}
-
 type imgbbResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
@@ -68,7 +43,9 @@ type imgbbResponse struct {
 	} `json:"error"`
 }
 
-func (h *ImgBBHost) doUpload(ctx context.Context, fpath string) (models.UploadResult, error) {
+// UploadImage faz upload pro ImgBB. Uma tentativa só — retry e backoff já
+// são responsabilidade do worker.Pool (que envolve todo host igual).
+func (h *ImgBBHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
 	if h.config.HostToken == "" {
 		return models.UploadResult{}, fmt.Errorf("host_token (API Key) não configurado para ImgBB")
 	}

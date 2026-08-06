@@ -33,35 +33,9 @@ func (h *CatboxHost) Name() string {
 	return "Catbox"
 }
 
-// UploadImage faz o upload para o Catbox.moe com até 3 retentativas e Backoff Exponencial
+// UploadImage faz upload pro Catbox.moe. Uma tentativa só — retry e backoff
+// já são responsabilidade do worker.Pool (que envolve todo host igual).
 func (h *CatboxHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
-	maxRetries := 3
-	var lastErr error
-
-	for i := 0; i < maxRetries; i++ {
-		res, err := h.doUpload(ctx, fpath)
-		if err == nil {
-			return res, nil
-		}
-		lastErr = err
-
-		// Espera exponencial: 2s, 4s, 8s...
-		select {
-		case <-ctx.Done():
-			return models.UploadResult{}, ctx.Err()
-		case <-time.After(time.Duration(1<<i) * 2 * time.Second):
-		}
-	}
-
-	return models.UploadResult{
-		Filename: filepath.Base(fpath),
-		Success:  false,
-		Error:    lastErr.Error(),
-	}, lastErr
-}
-
-// doUpload encapsula a chamada HTTP pura
-func (h *CatboxHost) doUpload(ctx context.Context, fpath string) (models.UploadResult, error) {
 	file, err := os.Open(fpath)
 	if err != nil {
 		return models.UploadResult{}, err
