@@ -24,6 +24,9 @@ func TestChapterKeyAceitaNumeroPrimeiroOuComPrefixo(t *testing.T) {
 		{"Cap 019.1 - Título", "019.1"},
 		{"Cap 037 - Título", "037"},
 		{"Cap 000", "000"},
+		{"Ch.001 - O Andar de Testes", "001"},
+		{"Ch.010 - Rainha dos Golfinhos de Rede", "010"},
+		{"Ch.068 - O líder da família Ari", "068"},
 	}
 
 	seen := make(map[string]string)

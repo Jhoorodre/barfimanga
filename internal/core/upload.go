@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -49,18 +50,23 @@ func loadSakuraVolumes(path string) map[float64]string {
 	return m
 }
 
-// numberToken acha o token que contém o número do capítulo, aceitando tanto
-// "65 - Título" (número no primeiro token) quanto "Cap 065 - Título"
-// (prefixo textual seguido do número).
+// trailingNumberRe acha um número (inteiro ou com decimal) no final de um token.
+var trailingNumberRe = regexp.MustCompile(`\d+(\.\d+)?$`)
+
+// numberToken acha o texto que contém o número do capítulo, cobrindo:
+// "65 - Título" (número puro no 1º token), "Cap 065 - Título" (prefixo
+// textual separado por espaço) e "Ch.065 - Título" (prefixo colado sem
+// espaço, ex: "Ch.001", "Vol.02") — nesse último caso pega só o número
+// no final do token, ignorando o prefixo grudado nele.
 func numberToken(parts []string) (string, bool) {
-	if len(parts) == 0 {
-		return "", false
+	limit := len(parts)
+	if limit > 2 {
+		limit = 2
 	}
-	if _, err := strconv.ParseFloat(parts[0], 64); err == nil {
-		return parts[0], true
-	}
-	if len(parts) >= 2 {
-		return parts[1], true
+	for _, p := range parts[:limit] {
+		if m := trailingNumberRe.FindString(p); m != "" {
+			return m, true
+		}
 	}
 	return "", false
 }
