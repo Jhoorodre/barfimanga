@@ -1,6 +1,17 @@
 package core
 
-import "testing"
+import (
+	"archive/zip"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"barfimanga/internal/config"
+	"barfimanga/internal/github"
+	"barfimanga/internal/models"
+)
 
 func TestChapterKeyAceitaNumeroPrimeiroOuComPrefixo(t *testing.T) {
 	cases := []struct {
@@ -42,6 +53,85 @@ func TestChapterNumberFromNameAceitaNumeroPrimeiroOuComPrefixo(t *testing.T) {
 		got, ok := chapterNumberFromName(c.folder)
 		if ok != c.ok || (ok && got != c.want) {
 			t.Errorf("chapterNumberFromName(%q) = (%v, %v), esperado (%v, %v)", c.folder, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// fakeHost simula um Host sem tocar na rede — sempre reporta sucesso.
+type fakeHost struct{}
+
+func (fakeHost) Name() string { return "fake" }
+
+func (fakeHost) UploadImage(ctx context.Context, path string) (models.UploadResult, error) {
+	return models.UploadResult{URL: "https://fake.test/" + filepath.Base(path), Filename: filepath.Base(path), Success: true}, nil
+}
+
+func (fakeHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
+	return "", nil
+}
+
+// TestRunProcessaPastaEArchiveNoMesmoLote garante que um capítulo em pasta e
+// um capítulo empacotado num .cbz (extraído sob demanda) convivem no mesmo
+// upload e viram entradas corretas no reader.json.
+func TestRunProcessaPastaEArchiveNoMesmoLote(t *testing.T) {
+	mangaRoot := t.TempDir()
+
+	folderCh := filepath.Join(mangaRoot, "Cap 001 - Primeiro")
+	if err := os.MkdirAll(folderCh, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folderCh, "01.jpg"), []byte("pagina"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	zipPath := filepath.Join(mangaRoot, "Cap 002 - Segundo.cbz")
+	zf, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+	fw, err := zw.Create("01.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("pagina do zip")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	zf.Close()
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	active := config.Config{Workers: 2, RateLimit: 0, MaxRetries: 1}
+	p := &Pipeline{
+		active: active,
+		host:   fakeHost{},
+		client: github.NewClient(active), // GitHubToken vazio -> uploadToGitHub só avisa e retorna nil
+	}
+
+	err = p.Run(context.Background(), mangaRoot, true, "TestGroup", "obra_teste", "", true, false, config.MangaEntry{}, false)
+	if err != nil {
+		t.Fatalf("Run retornou erro: %v", err)
+	}
+
+	jsonPath := filepath.Join(mangaRoot, "obra_teste.json")
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("reader.json não foi criado: %v", err)
+	}
+
+	for _, want := range []string{`"001"`, `"002"`, "fake.test/01.jpg"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("esperava %q no reader.json, veio:\n%s", want, string(data))
 		}
 	}
 }

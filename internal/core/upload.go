@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"barfimanga/internal/archive"
 	"barfimanga/internal/cache"
 	"barfimanga/internal/config"
 	"barfimanga/internal/github"
@@ -233,6 +234,11 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			if e.IsDir() {
 				chapters = append(chapters, e.Name())
 				hasSubDirs = true
+			} else if archive.IsArchive(e.Name()) {
+				// Arquivo .zip/.cbz/.rar/.cbr solto na raiz conta como capítulo,
+				// igual uma pasta — é extraído sob demanda no processamento.
+				chapters = append(chapters, e.Name())
+				hasSubDirs = true
 			}
 		}
 
@@ -345,22 +351,28 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 	pool := worker.NewPool(p.host, p.active.Workers, p.active.RateLimit, p.active.MaxRetries)
 
-	for _, ch := range chapters {
-		if state.CompletedChapters[ch] && !forceRebuild {
-			if !quiet {
-				fmt.Printf("\n-> Capítulo: %s (Pulado via State Checkpoint)\n", ch)
+	// processChapter cuida de um capítulo inteiro (extrai se for archive, sobe
+	// imagens, faz merge/checkpoint). Retorna cancelled=true se o Ctrl+C
+	// interrompeu o processo, sinal pro loop principal parar de vez.
+	processChapter := func(ch string) (cancelled bool) {
+		chName := ch // nome sem extensão, usado pra título/chave/volume
+		chDir := dir
+
+		switch {
+		case archive.IsArchive(ch):
+			chName = strings.TrimSuffix(ch, filepath.Ext(ch))
+			tempDir, err := os.MkdirTemp("", "barfimanga_ch_*")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "   [!] Erro criando pasta temporária: %v\n", err)
+				return false
 			}
-			continue
-		}
-
-		if !quiet {
-			fmt.Printf("\n-> Capítulo: %s\n", ch)
-		}
-
-		var chDir string
-		if !hasSubDirs {
-			chDir = dir
-		} else {
+			defer os.RemoveAll(tempDir)
+			if err := archive.Extract(filepath.Join(dir, ch), tempDir); err != nil {
+				fmt.Fprintf(os.Stderr, "   [!] Erro extraindo %s: %v\n", ch, err)
+				return false
+			}
+			chDir = tempDir
+		case hasSubDirs:
 			chDir = filepath.Join(dir, ch)
 		}
 
@@ -369,7 +381,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			if !quiet {
 				fmt.Printf("   Nenhuma imagem suportada encontrada, ignorando.\n")
 			}
-			continue
+			return false
 		}
 
 		utils.NaturalSort(images)
@@ -389,12 +401,12 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			fmt.Println("\n\n[!] Processo cancelado pelo usuário (Ctrl+C).")
 			fmt.Println("[i] O progresso de todos os capítulos já concluídos foi salvo localmente com segurança.")
 			logPipeline("ABORTADO: Cancelamento do usuário detectado no capítulo " + ch)
-			return nil
+			return true
 		}
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "   [X] Erro crítico processando %s: %v\n", ch, err)
-			continue
+			return false
 		}
 
 		var urls []string
@@ -406,47 +418,66 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			}
 		}
 
-		if len(urls) > 0 {
-			if !quiet {
-				cached := tracker.FromCache.Load()
-				uploaded := int64(len(urls)) - cached
-				fmt.Printf("   -> Sucesso: %d/%d (cache:%d · novos:%d)\n", len(urls), len(images), cached, uploaded)
-			} else {
-				for _, u := range urls {
-					fmt.Println(u)
-				}
-			}
-
-			volume := ""
-			if sakuraVolumes != nil {
-				if num, ok := chapterNumberFromName(ch); ok {
-					volume = sakuraVolumes[num]
-				}
-			}
-			chapterMetadata := models.Chapter{
-				Title:       formatChapterTitle(ch, volume, showVol),
-				Volume:      volume,
-				LastUpdated: fmt.Sprintf("%d", time.Now().Unix()),
-				Groups: map[string][]string{
-					groupName: urls,
-				},
-			}
-
-			newData.Chapters[chapterKey(ch)] = chapterMetadata
-			existingJson = utils.MergeMetadata(existingJson, newData, "smart")
-
-			if err := utils.SaveJSON(jsonPath, existingJson); err != nil {
-				fmt.Fprintf(os.Stderr, "   [!] Aviso: Erro ao salvar checkpoint incremental: %v\n", err)
-				logPipeline(fmt.Sprintf("ERRO: checkpoint JSON do cap %s: %v", ch, err))
-			} else {
-				state.CompletedChapters[ch] = true
-				_ = utils.SaveState(dbRoot, state)
-				logPipeline(fmt.Sprintf("SUCESSO: Cap %s concluído (%d imagens)", ch, len(urls)))
-			}
-			newData.Chapters = make(map[string]models.Chapter)
-		} else {
+		if len(urls) == 0 {
 			fmt.Fprintf(os.Stderr, "   [X] Falha geral nas imagens do capítulo.\n")
 			logPipeline(fmt.Sprintf("FALHA TOTAL: Cap %s não teve imagens salvas", ch))
+			return false
+		}
+
+		if !quiet {
+			cached := tracker.FromCache.Load()
+			uploaded := int64(len(urls)) - cached
+			fmt.Printf("   -> Sucesso: %d/%d (cache:%d · novos:%d)\n", len(urls), len(images), cached, uploaded)
+		} else {
+			for _, u := range urls {
+				fmt.Println(u)
+			}
+		}
+
+		volume := ""
+		if sakuraVolumes != nil {
+			if num, ok := chapterNumberFromName(chName); ok {
+				volume = sakuraVolumes[num]
+			}
+		}
+		chapterMetadata := models.Chapter{
+			Title:       formatChapterTitle(chName, volume, showVol),
+			Volume:      volume,
+			LastUpdated: fmt.Sprintf("%d", time.Now().Unix()),
+			Groups: map[string][]string{
+				groupName: urls,
+			},
+		}
+
+		newData.Chapters[chapterKey(chName)] = chapterMetadata
+		existingJson = utils.MergeMetadata(existingJson, newData, "smart")
+
+		if err := utils.SaveJSON(jsonPath, existingJson); err != nil {
+			fmt.Fprintf(os.Stderr, "   [!] Aviso: Erro ao salvar checkpoint incremental: %v\n", err)
+			logPipeline(fmt.Sprintf("ERRO: checkpoint JSON do cap %s: %v", ch, err))
+		} else {
+			state.CompletedChapters[ch] = true
+			_ = utils.SaveState(dbRoot, state)
+			logPipeline(fmt.Sprintf("SUCESSO: Cap %s concluído (%d imagens)", ch, len(urls)))
+		}
+		newData.Chapters = make(map[string]models.Chapter)
+		return false
+	}
+
+	for _, ch := range chapters {
+		if state.CompletedChapters[ch] && !forceRebuild {
+			if !quiet {
+				fmt.Printf("\n-> Capítulo: %s (Pulado via State Checkpoint)\n", ch)
+			}
+			continue
+		}
+
+		if !quiet {
+			fmt.Printf("\n-> Capítulo: %s\n", ch)
+		}
+
+		if processChapter(ch) {
+			return nil // cancelado pelo usuário — não tenta sincronizar com o GitHub
 		}
 	}
 

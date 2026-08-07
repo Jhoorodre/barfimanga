@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-isatty v0.0.20
+	github.com/nwaples/rardecode/v2 v2.3.0
 	golang.org/x/image v0.40.0
 	golang.org/x/term v0.42.0
 	golang.org/x/text v0.37.0
