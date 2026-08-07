@@ -31,19 +31,27 @@ func (h *ImgurHost) Name() string {
 	return "Imgur"
 }
 
+// imgurResponse cobre os dois formatos de erro que a API já devolveu:
+// o clássico {success, data:{error}} e o novo estilo JSON:API {errors:[...]}
+// que o gateway atual usa (confirmado batendo direto na API — um erro real
+// nesse formato novo virava mensagem vazia, já que só líamos data.error).
 type imgurResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
 		Link  string `json:"link"`
 		Error string `json:"error"`
 	} `json:"data"`
+	Errors []struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	} `json:"errors"`
 }
 
 // UploadImage faz upload pro Imgur. Uma tentativa só — retry e backoff já
 // são responsabilidade do worker.Pool (que envolve todo host igual).
 func (h *ImgurHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
 	if h.config.HostToken == "" {
-		return models.UploadResult{}, fmt.Errorf("host_token (Client-ID ou Bearer) não configurado para Imgur")
+		return models.UploadResult{}, fmt.Errorf("host_token (Client-ID) não configurado para Imgur")
 	}
 
 	imgData, err := os.ReadFile(fpath)
@@ -68,13 +76,7 @@ func (h *ImgurHost) UploadImage(ctx context.Context, fpath string) (models.Uploa
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-
-	// Imgur aceita Client-ID ou Bearer token (para contas)
-	if len(h.config.HostToken) > 15 { // Muito provavelmente um Client-ID
-		req.Header.Set("Authorization", "Client-ID "+h.config.HostToken)
-	} else {
-		req.Header.Set("Authorization", "Bearer "+h.config.HostToken)
-	}
+	req.Header.Set("Authorization", "Client-ID "+h.config.HostToken)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -82,17 +84,16 @@ func (h *ImgurHost) UploadImage(ctx context.Context, fpath string) (models.Uploa
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 429 {
-		return models.UploadResult{}, fmt.Errorf("rate limited pelo Imgur (HTTP 429)")
-	}
-
 	var result imgurResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return models.UploadResult{}, err
+		return models.UploadResult{}, fmt.Errorf("erro http %d, resposta ilegível: %w", resp.StatusCode, err)
 	}
 
 	if !result.Success {
-		return models.UploadResult{}, fmt.Errorf("imgur api error: %s", result.Data.Error)
+		if len(result.Errors) > 0 {
+			return models.UploadResult{}, fmt.Errorf("imgur api error (%d, %s): %s", resp.StatusCode, result.Errors[0].Code, result.Errors[0].Detail)
+		}
+		return models.UploadResult{}, fmt.Errorf("imgur api error (%d): %s", resp.StatusCode, result.Data.Error)
 	}
 
 	return models.UploadResult{
