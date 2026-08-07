@@ -3,15 +3,18 @@ package core
 import (
 	"archive/zip"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"barfimanga/internal/config"
 	"barfimanga/internal/github"
 	"barfimanga/internal/models"
+	"barfimanga/internal/utils"
 )
 
 func TestChapterKeyAceitaNumeroPrimeiroOuComPrefixo(t *testing.T) {
@@ -207,4 +210,101 @@ func TestRunAvisaImagemSoltaIgnoradaComArchiveNaRaiz(t *testing.T) {
 	if !strings.Contains(string(data), `"002"`) {
 		t.Errorf("esperava o capítulo do .cbz no reader.json, veio:\n%s", string(data))
 	}
+}
+
+// quotaHost simula um host que aceita só N uploads antes de começar a
+// recusar (como o "Upload limit reached" real do ImgChest no meio de um
+// capítulo).
+type quotaHost struct {
+	mu        sync.Mutex
+	remaining int
+}
+
+func (h *quotaHost) Name() string { return "quota" }
+
+func (h *quotaHost) UploadImage(ctx context.Context, path string) (models.UploadResult, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.remaining <= 0 {
+		return models.UploadResult{Filename: filepath.Base(path), Success: false, Error: "quota excedida"}, fmt.Errorf("quota excedida")
+	}
+	h.remaining--
+	return models.UploadResult{URL: "https://fake.test/" + filepath.Base(path), Filename: filepath.Base(path), Success: true}, nil
+}
+
+func (h *quotaHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
+	return "", nil
+}
+
+// TestRunCapituloParcialNaoFicaMarcadoComoCompletoEDepoisSeCompleta reproduz
+// o cenário real de bater numa cota de upload no meio de um capítulo: antes
+// do fix, um capítulo com sucesso parcial (2 de 3 imagens) era marcado como
+// concluído no checkpoint, perdendo a imagem que faltou pra sempre. Agora
+// não marca — a segunda execução (simulando a cota liberada depois) reusa
+// do cache as que já subiram e só reenvia a que faltou, completando o
+// capítulo.
+func TestRunCapituloParcialNaoFicaMarcadoComoCompletoEDepoisSeCompleta(t *testing.T) {
+	mangaRoot := t.TempDir()
+	chDir := filepath.Join(mangaRoot, "Ch.021 - Erupção")
+	if err := os.MkdirAll(chDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i, content := range []string{"pagina1", "pagina2", "pagina3"} {
+		name := fmt.Sprintf("%02d.jpg", i+1)
+		if err := os.WriteFile(filepath.Join(chDir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	active := config.Config{Workers: 1, MaxRetries: 1}
+	host := &quotaHost{remaining: 2} // só deixa 2 das 3 imagens passarem
+	p := &Pipeline{active: active, host: host, client: github.NewClient(active)}
+
+	jsonPath := filepath.Join(mangaRoot, "obra.json")
+
+	// 1ª execução: bate na cota no meio do capítulo.
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false); err != nil {
+		t.Fatalf("1ª execução: Run retornou erro: %v", err)
+	}
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "fake.test/") != 2 {
+		t.Fatalf("esperava 2 imagens salvas após a 1ª execução, veio:\n%s", string(data))
+	}
+
+	state := loadStateForTest(t, mangaRoot)
+	if state.CompletedChapters["Ch.021 - Erupção"] {
+		t.Fatal("capítulo parcial não deveria estar marcado como concluído no checkpoint")
+	}
+
+	// "Cota libera" — segunda execução deve completar a imagem que faltou.
+	host.remaining = 10
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false); err != nil {
+		t.Fatalf("2ª execução: Run retornou erro: %v", err)
+	}
+	data, err = os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "fake.test/") != 3 {
+		t.Fatalf("esperava as 3 imagens salvas após a 2ª execução, veio:\n%s", string(data))
+	}
+
+	state = loadStateForTest(t, mangaRoot)
+	if !state.CompletedChapters["Ch.021 - Erupção"] {
+		t.Fatal("capítulo deveria estar marcado como concluído depois de completar na 2ª execução")
+	}
+}
+
+func loadStateForTest(t *testing.T, dbRoot string) *utils.UploadState {
+	t.Helper()
+	return utils.LoadState(dbRoot)
 }

@@ -433,6 +433,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			logPipeline(fmt.Sprintf("FALHA TOTAL: Cap %s não teve imagens salvas", ch))
 			return false
 		}
+		partial := len(urls) < len(images)
 
 		if !quiet {
 			cached := tracker.FromCache.Load()
@@ -465,6 +466,12 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		if err := utils.SaveJSON(jsonPath, existingJson); err != nil {
 			fmt.Fprintf(os.Stderr, "   [!] Aviso: Erro ao salvar checkpoint incremental: %v\n", err)
 			logPipeline(fmt.Sprintf("ERRO: checkpoint JSON do cap %s: %v", ch, err))
+		} else if partial {
+			// Não marca como concluído — faltou imagem (ex: rate limit no meio do
+			// capítulo). Salva o que deu certo, mas deixa reprocessar no próximo
+			// run (sem --force) até completar; as que já subiram vêm do cache.
+			fmt.Fprintf(os.Stderr, "   [!] Capítulo salvo parcialmente (%d/%d) — será reprocessado na próxima execução até completar.\n", len(urls), len(images))
+			logPipeline(fmt.Sprintf("PARCIAL: Cap %s salvo com %d/%d imagens, não marcado como concluído", ch, len(urls), len(images)))
 		} else {
 			state.CompletedChapters[ch] = true
 			_ = utils.SaveState(dbRoot, state)
