@@ -255,6 +255,10 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 				}
 				chapters = []string{filepath.Base(dir)}
 			}
+		} else if loose, _ := p.findImages(dir); len(loose) > 0 {
+			// Já achamos pastas/archives de capítulo, então o auto-fill não entra —
+			// mas ainda tem imagem solta direto na raiz, que ficaria sem dono.
+			fmt.Fprintf(os.Stderr, "[!] Aviso: %d imagem(ns) solta(s) na raiz de %s serão ignoradas (já existem subpastas/arquivos de capítulo aqui). Mova pra dentro de um capítulo se forem páginas de verdade.\n", len(loose), dir)
 		}
 
 		if len(chapters) == 0 {

@@ -3,6 +3,7 @@ package core
 import (
 	"archive/zip"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,5 +134,74 @@ func TestRunProcessaPastaEArchiveNoMesmoLote(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("esperava %q no reader.json, veio:\n%s", want, string(data))
 		}
+	}
+}
+
+// TestRunAvisaImagemSoltaIgnoradaComArchiveNaRaiz documenta um caso limite
+// real: se tiver imagem solta direto na raiz da obra E também um arquivo de
+// capítulo (.cbz/.zip/...) no mesmo diretório, a imagem solta não vira
+// capítulo nenhum (o auto-fill de capítulo único não dispara, já que achou
+// um capítulo de verdade) — ela é descartada. O comportamento em si não é
+// resolvido aqui (não daria pra saber que "número" ela deveria ter), mas o
+// usuário precisa ser avisado em vez de simplesmente perder a página em
+// silêncio.
+func TestRunAvisaImagemSoltaIgnoradaComArchiveNaRaiz(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "01.jpg"), []byte("pagina solta"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	zipPath := filepath.Join(root, "Cap 002.cbz")
+	zf, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+	fw, err := zw.Create("01.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte("pagina do zip")); err != nil {
+		t.Fatal(err)
+	}
+	zw.Close()
+	zf.Close()
+
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+
+	active := config.Config{Workers: 1, MaxRetries: 1}
+	p := &Pipeline{active: active, host: fakeHost{}, client: github.NewClient(active)}
+	runErr := p.Run(context.Background(), root, true, "G", "obra", "", true, false, config.MangaEntry{}, false)
+
+	w.Close()
+	os.Stderr = oldStderr
+	stderrBytes, _ := io.ReadAll(r)
+	stderr := string(stderrBytes)
+
+	if runErr != nil {
+		t.Fatalf("Run retornou erro: %v", runErr)
+	}
+	if !strings.Contains(stderr, "imagem(ns) solta") {
+		t.Fatalf("esperava aviso sobre imagem solta ignorada no stderr, veio:\n%s", stderr)
+	}
+
+	jsonPath := filepath.Join(root, "obra.json")
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"002"`) {
+		t.Errorf("esperava o capítulo do .cbz no reader.json, veio:\n%s", string(data))
 	}
 }
