@@ -30,6 +30,8 @@ func TestChapterKeyAceitaNumeroPrimeiroOuComPrefixo(t *testing.T) {
 		{"Ch.001 - O Andar de Testes", "001"},
 		{"Ch.010 - Rainha dos Golfinhos de Rede", "010"},
 		{"Ch.068 - O líder da família Ari", "068"},
+		{"Ch.65,5 - Título", "065.5"},
+		{"Cap 70,25 - Título", "070.25"},
 	}
 
 	seen := make(map[string]string)
@@ -42,6 +44,24 @@ func TestChapterKeyAceitaNumeroPrimeiroOuComPrefixo(t *testing.T) {
 			t.Errorf("colisão de chave: %q e %q geraram a mesma chave %q", prev, c.folder, got)
 		}
 		seen[got] = c.folder
+	}
+}
+
+// TestChapterKeyVirgulaEPontoSaoCompativeis garante que ponto e vírgula como
+// separador decimal são tratados como o MESMO capítulo (mesma chave) — não
+// dá pra checar isso na lista de colisão acima porque aqui a colisão é
+// esperada e correta.
+func TestChapterKeyVirgulaEPontoSaoCompativeis(t *testing.T) {
+	pares := [][2]string{
+		{"65.5 - Título", "65,5 - Título"},
+		{"Ch.065.5 - Título", "Ch.065,5 - Título"},
+		{"Cap 19.1 - Título", "Cap 19,1 - Título"},
+	}
+	for _, p := range pares {
+		a, b := chapterKey(p[0]), chapterKey(p[1])
+		if a != b {
+			t.Errorf("chapterKey(%q)=%q e chapterKey(%q)=%q deveriam ser iguais", p[0], a, p[1], b)
+		}
 	}
 }
 

@@ -50,8 +50,11 @@ func loadSakuraVolumes(path string) map[float64]string {
 	return m
 }
 
-// trailingNumberRe acha um número (inteiro ou com decimal) no final de um token.
-var trailingNumberRe = regexp.MustCompile(`\d+(\.\d+)?$`)
+// trailingNumberRe acha um número (inteiro ou com decimal) no final de um
+// token. Aceita ponto ou vírgula como separador decimal (ex: "65.5", "65,5")
+// — a chave final sempre normaliza pra ponto, então "Cap 65.5" e "Cap 65,5"
+// caem na mesma chave "065.5".
+var trailingNumberRe = regexp.MustCompile(`\d+([.,]\d+)?$`)
 
 // numberToken acha o texto que contém o número do capítulo, cobrindo:
 // "65 - Título" (número puro no 1º token), "Cap 065 - Título" (prefixo
@@ -78,6 +81,7 @@ func chapterKey(folderName string) string {
 	if !ok {
 		return folderName
 	}
+	raw = strings.Replace(raw, ",", ".", 1)
 	dotIdx := strings.IndexByte(raw, '.')
 	intPart, decPart := raw, ""
 	if dotIdx >= 0 {
@@ -97,7 +101,7 @@ func chapterNumberFromName(name string) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
-	n, err := strconv.ParseFloat(raw, 64)
+	n, err := strconv.ParseFloat(strings.Replace(raw, ",", ".", 1), 64)
 	return n, err == nil
 }
 
