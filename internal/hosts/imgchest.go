@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"barfimanga/internal/config"
@@ -19,6 +20,13 @@ import (
 type ImgChestHost struct {
 	config config.Config
 	client *http.Client
+
+	// quotaWaits/quotaWaitNanos acumulam quantas vezes e por quanto tempo o
+	// upload dormiu esperando a cota da API liberar (ver waitForRetryAfter) —
+	// expostos via QuotaCycles() pro resumo do lote mostrar a dimensão real
+	// dos ciclos de cota, não só "deu erro".
+	quotaWaits     atomic.Int64
+	quotaWaitNanos atomic.Int64
 }
 
 func NewImgChestHost(cfg config.Config) *ImgChestHost {
@@ -110,7 +118,7 @@ func (h *ImgChestHost) UploadImage(ctx context.Context, fpath string) (models.Up
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		if resp.StatusCode == http.StatusTooManyRequests {
-			waitForRetryAfter(ctx, bodyBytes)
+			h.waitForRetryAfter(ctx, bodyBytes)
 		}
 		return models.UploadResult{}, fmt.Errorf("erro http %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -135,7 +143,9 @@ func (h *ImgChestHost) UploadImage(ctx context.Context, fpath string) (models.Up
 // esse campo) antes de devolver o controle. Ignora silenciosamente se o
 // corpo não tiver retry_after (ex: o 429 genérico "Too Many Attempts." do
 // throttle do Laravel) — nesse caso o backoff normal do worker.Pool decide.
-func waitForRetryAfter(ctx context.Context, body []byte) {
+// Imprime o ciclo (duração exata + horário de retomada) no stderr, já que
+// isso senão é um bloqueio de até 2h totalmente invisível pro usuário.
+func (h *ImgChestHost) waitForRetryAfter(ctx context.Context, body []byte) {
 	var rl imgChestRateLimitResponse
 	if err := json.Unmarshal(body, &rl); err != nil || rl.RetryAfter <= 0 {
 		return
@@ -144,10 +154,25 @@ func waitForRetryAfter(ctx context.Context, body []byte) {
 	if wait > maxRetryAfterWait {
 		wait = maxRetryAfterWait
 	}
+
+	h.quotaWaits.Add(1)
+	h.quotaWaitNanos.Add(int64(wait))
+	resumeAt := time.Now().Add(wait)
+	fmt.Fprintf(os.Stderr, "\n   [ImgChest] cota de upload atingida — aguardando %s (retoma às %s)\n",
+		wait.Round(time.Second), resumeAt.Format("15:04:05"))
+
 	select {
 	case <-time.After(wait):
+		fmt.Fprintln(os.Stderr, "   [ImgChest] cota liberada, retomando uploads.")
 	case <-ctx.Done():
 	}
+}
+
+// QuotaCycles reporta quantos ciclos de espera de cota ocorreram nessa
+// instância do host e o tempo total gasto dormindo por causa deles — usado
+// pelo resumo do lote (ver hosts.QuotaReporter).
+func (h *ImgChestHost) QuotaCycles() (waits int, totalWait time.Duration) {
+	return int(h.quotaWaits.Load()), time.Duration(h.quotaWaitNanos.Load())
 }
 
 func (h *ImgChestHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {

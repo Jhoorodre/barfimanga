@@ -2,6 +2,7 @@ package hosts
 
 import (
 	"context"
+	"time"
 
 	"barfimanga/internal/models"
 )
@@ -17,4 +18,12 @@ type Host interface {
 
 	// Name retorna o nome de exibição do provedor de hospedagem (ex: "Catbox").
 	Name() string
+}
+
+// QuotaReporter é implementado opcionalmente por hosts que têm cota de
+// upload própria (separada do rate-limit de requisição) e pausam pra
+// esperá-la liberar — hoje só o ImgChest. Usado pelo resumo do lote pra
+// mostrar quantos desses ciclos ocorreram e quanto tempo foi gasto neles.
+type QuotaReporter interface {
+	QuotaCycles() (waits int, totalWait time.Duration)
 }

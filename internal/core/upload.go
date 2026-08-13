@@ -176,11 +176,18 @@ func (s *batchStats) lines() []string {
 }
 
 // printBatchSummary imprime (se não for quiet) e loga o resumo final do lote.
-func printBatchSummary(stats *batchStats, quiet bool) {
+// host é opcional (usado só pra checar hosts.QuotaReporter) — pode ser nil.
+func printBatchSummary(stats *batchStats, host hosts.Host, quiet bool) {
 	if stats.chaptersTotal() == 0 {
 		return // nada processado nesse run, não polui log/console à toa
 	}
 	lines := stats.lines()
+	if qr, ok := host.(hosts.QuotaReporter); ok {
+		if waits, total := qr.QuotaCycles(); waits > 0 {
+			lines = append(lines, fmt.Sprintf("%s: %d ciclo(s) de cota | %s de espera total",
+				host.Name(), waits, total.Round(time.Second)))
+		}
+	}
 	if !quiet {
 		fmt.Println("\n==============================================")
 		fmt.Println("RESUMO DO LOTE")
@@ -563,12 +570,12 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		}
 
 		if processChapter(ch) {
-			printBatchSummary(stats, quiet)
+			printBatchSummary(stats, p.host, quiet)
 			return nil // cancelado pelo usuário — não tenta sincronizar com o GitHub
 		}
 	}
 
-	printBatchSummary(stats, quiet)
+	printBatchSummary(stats, p.host, quiet)
 	logPipeline("FINALIZANDO PIPELINE de Upload. Chamando GitHub Sync...")
 	return p.uploadToGitHub(ctx, jsonPath, jsonFilename, effectiveID, ghFolder, useRoot, mangaTitle, quiet)
 }

@@ -85,3 +85,33 @@ func TestImgChestUploadRetryAfterRespeitaCancelamento(t *testing.T) {
 		t.Fatalf("cancelamento do contexto deveria interromper a espera de 1h, levou %v", elapsed)
 	}
 }
+
+// TestImgChestQuotaCyclesAcumulaEsperas garante que cada ciclo de espera de
+// cota (429 com retry_after) fica contabilizado em QuotaCycles(), pro
+// resumo do lote conseguir mostrar quantos ciclos e quanto tempo foram
+// gastos nisso.
+func TestImgChestQuotaCyclesAcumulaEsperas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"Upload limit reached.","remaining":0,"retry_after":1}`))
+	}))
+	defer server.Close()
+
+	h := NewImgChestHost(config.Config{HostToken: "fake-token"})
+	h.client = &http.Client{Transport: redirectTransport{target: server.URL}}
+
+	if waits, total := h.QuotaCycles(); waits != 0 || total != 0 {
+		t.Fatalf("esperava zero ciclos antes de qualquer upload, veio waits=%d total=%v", waits, total)
+	}
+
+	_, _ = h.UploadImage(context.Background(), writeTempImage(t))
+	_, _ = h.UploadImage(context.Background(), writeTempImage(t))
+
+	waits, total := h.QuotaCycles()
+	if waits != 2 {
+		t.Fatalf("esperava 2 ciclos de cota, veio %d", waits)
+	}
+	if total < 2*time.Second {
+		t.Fatalf("esperava pelo menos 2s de espera total acumulada, veio %v", total)
+	}
+}
