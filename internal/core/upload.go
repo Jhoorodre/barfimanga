@@ -180,6 +180,8 @@ func NewPipeline(mCfg config.MultiConfig) (*Pipeline, error) {
 		h = hosts.NewImgboxHost(active)
 	case "gdrive":
 		h = hosts.NewGDriveHost(active)
+	case "sxcu":
+		h = hosts.NewSxcuHost(active)
 	default:
 		return nil, fmt.Errorf("host '%s' não suportado", active.DefaultHost)
 	}

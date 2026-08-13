@@ -1,0 +1,67 @@
+package hosts
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"barfimanga/internal/config"
+)
+
+// TestSxcuUploadSucesso reproduz a resposta real observada testando contra a
+// API de verdade: {"id","url","del_url","thumb"}, sem exigir token.
+func TestSxcuUploadSucesso(t *testing.T) {
+	var gotNoembed, gotUserAgent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserAgent = r.Header.Get("User-Agent")
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+		gotNoembed = r.FormValue("noembed")
+		w.Write([]byte(`{"id":"7N1AA18gO","url":"https://sxcu.net/7N1AA18gO.jpeg","del_url":"https://sxcu.net/api/files/delete/7N1AA18gO/x","thumb":"https://sxcu.net/t/7N1AA18gO.jpeg"}`))
+	}))
+	defer server.Close()
+
+	h := NewSxcuHost(config.Config{})
+	h.client = &http.Client{Transport: redirectTransport{target: server.URL}}
+
+	res, err := h.UploadImage(context.Background(), writeTempImage(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.URL != "https://sxcu.net/7N1AA18gO.jpeg" || !res.Success {
+		t.Fatalf("resultado inesperado: %+v", res)
+	}
+	if gotNoembed == "" {
+		t.Fatal("esperava o campo noembed presente no upload (senão a API devolve link de página, não de arquivo)")
+	}
+	if gotUserAgent == "" {
+		t.Fatal("esperava um User-Agent não vazio (a API rejeita sem isso)")
+	}
+}
+
+// TestSxcuUploadErro garante que erro da API (ex: rate limit) vira erro Go
+// com a mensagem visível, não sucesso silencioso.
+func TestSxcuUploadErro(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"Rate limit exceeded","code":185}`))
+	}))
+	defer server.Close()
+
+	h := NewSxcuHost(config.Config{})
+	h.client = &http.Client{Transport: redirectTransport{target: server.URL}}
+
+	res, err := h.UploadImage(context.Background(), writeTempImage(t))
+	if err == nil {
+		t.Fatal("esperava erro")
+	}
+	if res.Success {
+		t.Fatal("esperava Success=false")
+	}
+	if !strings.Contains(err.Error(), "429") {
+		t.Fatalf("esperava o status 429 na mensagem de erro, veio: %v", err)
+	}
+}

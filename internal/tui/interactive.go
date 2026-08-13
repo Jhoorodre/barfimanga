@@ -774,6 +774,7 @@ func editProfile(mCfg *config.MultiConfig, name string) error {
 					huh.NewOption("ImgPile", "imgpile"),
 					huh.NewOption("ImgBox", "imgbox"),
 					huh.NewOption("Google Drive (lh3)", "gdrive"),
+					huh.NewOption("sxcu.net (sem conta)", "sxcu"),
 				).
 				Value(&cfg.DefaultHost),
 			huh.NewInput().Title("Host Token (API Key / Client-ID)").Value(&cfg.HostToken).EchoMode(huh.EchoModePassword),
