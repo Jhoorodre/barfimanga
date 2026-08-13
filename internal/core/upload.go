@@ -145,6 +145,54 @@ func logPipeline(msg string) {
 	}
 }
 
+// batchStats acumula os números de um lote inteiro (quantos capítulos e
+// imagens deram certo, parcial, falharam etc) pra imprimir/logar um resumo
+// no final do ciclo — capítulo isolado só mostra o próprio resultado, não dá
+// visão do lote inteiro.
+type batchStats struct {
+	chaptersOK       int
+	chaptersPartial  int
+	chaptersFailed   int
+	chaptersSkipped  int // via checkpoint (--force ignora e reprocessa)
+	chaptersNoImages int
+	imagesOK         int
+	imagesFailed     int
+}
+
+func (s *batchStats) chaptersTotal() int {
+	return s.chaptersOK + s.chaptersPartial + s.chaptersFailed + s.chaptersSkipped + s.chaptersNoImages
+}
+
+func (s *batchStats) imagesTotal() int {
+	return s.imagesOK + s.imagesFailed
+}
+
+func (s *batchStats) lines() []string {
+	return []string{
+		fmt.Sprintf("Capítulos: %d total | %d completos | %d parciais | %d falha total | %d pulados (checkpoint) | %d sem imagem",
+			s.chaptersTotal(), s.chaptersOK, s.chaptersPartial, s.chaptersFailed, s.chaptersSkipped, s.chaptersNoImages),
+		fmt.Sprintf("Imagens: %d total | %d sucesso | %d falha", s.imagesTotal(), s.imagesOK, s.imagesFailed),
+	}
+}
+
+// printBatchSummary imprime (se não for quiet) e loga o resumo final do lote.
+func printBatchSummary(stats *batchStats, quiet bool) {
+	if stats.chaptersTotal() == 0 {
+		return // nada processado nesse run, não polui log/console à toa
+	}
+	lines := stats.lines()
+	if !quiet {
+		fmt.Println("\n==============================================")
+		fmt.Println("RESUMO DO LOTE")
+		fmt.Println("==============================================")
+		for _, l := range lines {
+			fmt.Println(l)
+		}
+		fmt.Println("==============================================")
+	}
+	logPipeline("RESUMO DO LOTE: " + strings.Join(lines, " | "))
+}
+
 // Pipeline orquestra a lógica principal de scanning, upload e envio ao github.
 type Pipeline struct {
 	mCfg   config.MultiConfig
@@ -367,6 +415,8 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 	pool := worker.NewPool(p.host, p.active.Workers, p.active.RateLimit, p.active.MaxRetries)
 
+	stats := &batchStats{}
+
 	// processChapter cuida de um capítulo inteiro (extrai se for archive, sobe
 	// imagens, faz merge/checkpoint). Retorna cancelled=true se o Ctrl+C
 	// interrompeu o processo, sinal pro loop principal parar de vez.
@@ -397,6 +447,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			if !quiet {
 				fmt.Printf("   Nenhuma imagem suportada encontrada, ignorando.\n")
 			}
+			stats.chaptersNoImages++
 			return false
 		}
 
@@ -422,6 +473,8 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "   [X] Erro crítico processando %s: %v\n", ch, err)
+			stats.chaptersFailed++
+			stats.imagesFailed += len(images)
 			return false
 		}
 
@@ -437,9 +490,18 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		if len(urls) == 0 {
 			fmt.Fprintf(os.Stderr, "   [X] Falha geral nas imagens do capítulo.\n")
 			logPipeline(fmt.Sprintf("FALHA TOTAL: Cap %s não teve imagens salvas", ch))
+			stats.chaptersFailed++
+			stats.imagesFailed += len(images)
 			return false
 		}
 		partial := len(urls) < len(images)
+		stats.imagesOK += len(urls)
+		stats.imagesFailed += len(images) - len(urls)
+		if partial {
+			stats.chaptersPartial++
+		} else {
+			stats.chaptersOK++
+		}
 
 		if !quiet {
 			cached := tracker.FromCache.Load()
@@ -492,6 +554,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 			if !quiet {
 				fmt.Printf("\n-> Capítulo: %s (Pulado via State Checkpoint)\n", ch)
 			}
+			stats.chaptersSkipped++
 			continue
 		}
 
@@ -500,10 +563,12 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		}
 
 		if processChapter(ch) {
+			printBatchSummary(stats, quiet)
 			return nil // cancelado pelo usuário — não tenta sincronizar com o GitHub
 		}
 	}
 
+	printBatchSummary(stats, quiet)
 	logPipeline("FINALIZANDO PIPELINE de Upload. Chamando GitHub Sync...")
 	return p.uploadToGitHub(ctx, jsonPath, jsonFilename, effectiveID, ghFolder, useRoot, mangaTitle, quiet)
 }

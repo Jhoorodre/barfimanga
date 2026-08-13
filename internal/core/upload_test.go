@@ -328,3 +328,88 @@ func loadStateForTest(t *testing.T, dbRoot string) *utils.UploadState {
 	t.Helper()
 	return utils.LoadState(dbRoot)
 }
+
+// TestRunResumoDoLoteContaCapitulosEImagensCorretamente monta um lote com um
+// capítulo de cada tipo (completo, parcial, falha total, pulado via
+// checkpoint) e confere que o "RESUMO DO LOTE" gravado no pipeline.log bate
+// com os números certos.
+func TestRunResumoDoLoteContaCapitulosEImagensCorretamente(t *testing.T) {
+	mangaRoot := t.TempDir()
+
+	mk := func(chapter string, files map[string]string) {
+		dir := filepath.Join(mangaRoot, chapter)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	mk("Cap 001", map[string]string{"01.jpg": "a", "02.jpg": "b"})                // completo: 2/2
+	mk("Cap 002", map[string]string{"01.jpg": "c", "02.jpg": "d", "03.jpg": "e"}) // parcial: 2/3
+	mk("Cap 003", map[string]string{"01.jpg": "f", "02.jpg": "g"})                // falha total: 0/2
+	mk("Cap 004", map[string]string{"01.jpg": "h", "02.jpg": "i"})                // pulado via checkpoint
+
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	// Pré-marca "Cap 004" como já concluído, pra cair no caminho "pulado".
+	state := utils.LoadState(mangaRoot)
+	state.CompletedChapters["Cap 004"] = true
+	if err := utils.SaveState(mangaRoot, state); err != nil {
+		t.Fatal(err)
+	}
+
+	active := config.Config{Workers: 2, MaxRetries: 1}
+	p := &Pipeline{active: active, host: uniqueNameFailHost{fail: map[string]bool{
+		"Cap 002/03.jpg": true,
+		"Cap 003/01.jpg": true,
+		"Cap 003/02.jpg": true,
+	}}, client: github.NewClient(active)}
+
+	err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false)
+	if err != nil {
+		t.Fatalf("Run retornou erro: %v", err)
+	}
+
+	logData, err := os.ReadFile(filepath.Join("bd", "pipeline.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logData)
+
+	for _, want := range []string{
+		"Capítulos: 4 total | 1 completos | 1 parciais | 1 falha total | 1 pulados (checkpoint) | 0 sem imagem",
+		"Imagens: 7 total | 4 sucesso | 3 falha",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("esperava %q no RESUMO DO LOTE, log:\n%s", want, log)
+		}
+	}
+}
+
+// uniqueNameFailHost falha upload pra caminhos cujo sufixo "pasta/arquivo"
+// está em fail (evita colisão de nome-base repetido entre capítulos).
+type uniqueNameFailHost struct {
+	fail map[string]bool
+}
+
+func (h uniqueNameFailHost) Name() string { return "uniquefail" }
+
+func (h uniqueNameFailHost) UploadImage(ctx context.Context, path string) (models.UploadResult, error) {
+	key := filepath.Base(filepath.Dir(path)) + "/" + filepath.Base(path)
+	if h.fail[key] {
+		return models.UploadResult{Filename: key, Success: false, Error: "falha simulada"}, fmt.Errorf("falha simulada")
+	}
+	return models.UploadResult{URL: "https://fake.test/" + key, Filename: key, Success: true}, nil
+}
+
+func (h uniqueNameFailHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
+	return "", nil
+}
