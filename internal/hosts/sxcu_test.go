@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"barfimanga/internal/config"
 )
@@ -63,5 +64,66 @@ func TestSxcuUploadErro(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "429") {
 		t.Fatalf("esperava o status 429 na mensagem de erro, veio: %v", err)
+	}
+}
+
+// TestSxcuRespeitaRateLimitHeaderEAcumulaQuotaCycles reproduz o 429 real da
+// API (rate limit de 3 req/min) com o header X-RateLimit-Reset-After, e
+// garante que o upload espera esse tempo e contabiliza o ciclo.
+func TestSxcuRespeitaRateLimitHeaderEAcumulaQuotaCycles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Reset-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"Rate limit exceeded","code":"815"}`))
+	}))
+	defer server.Close()
+
+	h := NewSxcuHost(config.Config{})
+	h.client = &http.Client{Transport: redirectTransport{target: server.URL}}
+
+	start := time.Now()
+	_, err := h.UploadImage(context.Background(), writeTempImage(t))
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("esperava erro (429)")
+	}
+	if elapsed < 1*time.Second {
+		t.Fatalf("esperava esperar pelo menos 1s (X-RateLimit-Reset-After), levou %v", elapsed)
+	}
+
+	waits, total := h.QuotaCycles()
+	if waits != 1 {
+		t.Fatalf("esperava 1 ciclo de rate-limit, veio %d", waits)
+	}
+	if total < 1*time.Second {
+		t.Fatalf("esperava pelo menos 1s de espera acumulada, veio %v", total)
+	}
+}
+
+// TestSxcuSemHeaderRateLimitNaoEspera garante que um 429 sem o header não
+// trava a chamada (comportamento antigo preservado).
+func TestSxcuSemHeaderRateLimitNaoEspera(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"Global rate limit exceeded","code":"02"}`))
+	}))
+	defer server.Close()
+
+	h := NewSxcuHost(config.Config{})
+	h.client = &http.Client{Transport: redirectTransport{target: server.URL}}
+
+	start := time.Now()
+	_, err := h.UploadImage(context.Background(), writeTempImage(t))
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("esperava erro (429)")
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("não deveria esperar sem o header, levou %v", elapsed)
+	}
+	if waits, _ := h.QuotaCycles(); waits != 0 {
+		t.Fatalf("esperava zero ciclos sem o header, veio %d", waits)
 	}
 }
