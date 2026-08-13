@@ -42,10 +42,26 @@ type imgChestPostResponse struct {
 	} `json:"data"`
 }
 
+// imgChestRateLimitResponse cobre o corpo do 429 de cota de upload
+// ("Upload limit reached. Try again in N minutes."), que vem com
+// retry_after em segundos — diferente do 429 genérico de rate-limit de
+// requisição (throttle do Laravel, só {"message":"Too Many Attempts."}).
+type imgChestRateLimitResponse struct {
+	RetryAfter int `json:"retry_after"`
+}
+
+// maxRetryAfterWait limita quanto tempo esperamos mesmo que a API peça mais
+// (proteção contra um valor absurdo/malformado — não é o cenário observado,
+// mas retry_after vem de fora, então validamos).
+const maxRetryAfterWait = 2 * time.Hour
+
 // UploadImage sobe UM arquivo como um post novo no ImgChest (a API não tem
 // endpoint de "upload avulso" — todo arquivo vira um post, mesmo que com uma
-// imagem só). Uma tentativa só — retry e backoff já são responsabilidade do
-// worker.Pool (que envolve todo host igual).
+// imagem só). Uma tentativa só (retry entre imagens fica a cargo do
+// worker.Pool) — mas se bater na cota de upload (429 com retry_after), dorme
+// o tempo exato que a API pediu antes de devolver o erro. Sem isso, o pool
+// ficaria martelando a API a cada poucos segundos por ~1h até a cota voltar,
+// sem nenhuma chance de dar certo nesse meio tempo.
 func (h *ImgChestHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
 	if h.config.HostToken == "" {
 		return models.UploadResult{}, fmt.Errorf("host_token (Personal Access Token) não configurado para ImgChest")
@@ -87,6 +103,9 @@ func (h *ImgChestHost) UploadImage(ctx context.Context, fpath string) (models.Up
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			waitForRetryAfter(ctx, bodyBytes)
+		}
 		return models.UploadResult{}, fmt.Errorf("erro http %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
@@ -104,6 +123,25 @@ func (h *ImgChestHost) UploadImage(ctx context.Context, fpath string) (models.Up
 		Filename: filepath.Base(fpath),
 		Success:  true,
 	}, nil
+}
+
+// waitForRetryAfter dorme retry_after segundos (se o corpo do 429 trouxer
+// esse campo) antes de devolver o controle. Ignora silenciosamente se o
+// corpo não tiver retry_after (ex: o 429 genérico "Too Many Attempts." do
+// throttle do Laravel) — nesse caso o backoff normal do worker.Pool decide.
+func waitForRetryAfter(ctx context.Context, body []byte) {
+	var rl imgChestRateLimitResponse
+	if err := json.Unmarshal(body, &rl); err != nil || rl.RetryAfter <= 0 {
+		return
+	}
+	wait := time.Duration(rl.RetryAfter) * time.Second
+	if wait > maxRetryAfterWait {
+		wait = maxRetryAfterWait
+	}
+	select {
+	case <-time.After(wait):
+	case <-ctx.Done():
+	}
 }
 
 func (h *ImgChestHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
