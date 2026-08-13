@@ -62,6 +62,12 @@ const maxRetryAfterWait = 2 * time.Hour
 // o tempo exato que a API pediu antes de devolver o erro. Sem isso, o pool
 // ficaria martelando a API a cada poucos segundos por ~1h até a cota voltar,
 // sem nenhuma chance de dar certo nesse meio tempo.
+//
+// ponytail: UploadImage não sabe quantas tentativas restam no worker.Pool,
+// então com MaxRetries=1 (não é o padrão nem o configurado hoje) essa espera
+// seria desperdiçada — não sobra uma 2ª chamada pra aproveitar a cota livre.
+// Upgrade: Host.UploadImage receber a tentativa/limite atual, se algum
+// perfil real precisar rodar com MaxRetries=1.
 func (h *ImgChestHost) UploadImage(ctx context.Context, fpath string) (models.UploadResult, error) {
 	if h.config.HostToken == "" {
 		return models.UploadResult{}, fmt.Errorf("host_token (Personal Access Token) não configurado para ImgChest")
