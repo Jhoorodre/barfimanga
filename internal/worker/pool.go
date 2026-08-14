@@ -2,11 +2,14 @@ package worker
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"barfimanga/internal/cache"
 	"barfimanga/internal/hosts"
+	"barfimanga/internal/imgfix"
 	"barfimanga/internal/models"
 	"barfimanga/internal/progress"
 	"golang.org/x/time/rate"
@@ -106,11 +109,29 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 					var uploadRes models.UploadResult
 					var uploadErr error
 
+					// uploadPath começa igual ao arquivo original; se um host
+					// rejeitar por formato e for .webp, cai pro fallback de
+					// PNG (ver imgfix) — genérico, vale pra qualquer host,
+					// não só o que motivou isso (ImgChest rejeitando WebP
+					// estendido/VP8X mesmo sendo válido).
+					uploadPath := j.filepath
+					webpFallbackTried := false
+					var webpFallbackCleanup func()
+
 					// Retry logic agressivo para lidar com falhas de ActiveModel do backend Ruby (ImgBox)
 					for attempt := 1; attempt <= p.maxRetries; attempt++ {
-						uploadRes, uploadErr = p.host.UploadImage(ctx, j.filepath)
+						uploadRes, uploadErr = p.host.UploadImage(ctx, uploadPath)
 						if uploadErr == nil && uploadRes.Success {
+							uploadRes.Filename = filepath.Base(j.filepath)
 							break
+						}
+
+						if !webpFallbackTried && strings.EqualFold(filepath.Ext(uploadPath), ".webp") {
+							webpFallbackTried = true
+							if newPath, cleanup, fixErr := imgfix.NormalizeWebP(uploadPath); fixErr == nil {
+								uploadPath = newPath
+								webpFallbackCleanup = cleanup
+							}
 						}
 
 						if attempt < p.maxRetries {
@@ -119,9 +140,15 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 							select {
 							case <-time.After(time.Duration(backoffTime) * time.Second):
 							case <-ctx.Done():
+								if webpFallbackCleanup != nil {
+									webpFallbackCleanup()
+								}
 								return
 							}
 						}
+					}
+					if webpFallbackCleanup != nil {
+						webpFallbackCleanup()
 					}
 
 					if uploadErr != nil || !uploadRes.Success {

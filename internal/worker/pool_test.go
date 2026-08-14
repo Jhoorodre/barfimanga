@@ -3,6 +3,8 @@ package worker_test
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,5 +114,64 @@ func TestPool_RateLimiting(t *testing.T) {
 	// We check if it took more than 150ms to account for test speed variations.
 	if elapsed < 150*time.Millisecond {
 		t.Errorf("Rate limiter didn't throttle. Execution was too fast: %v", elapsed)
+	}
+}
+
+// webpRejectingHost simula um host (ex: ImgChest) que rejeita .webp por
+// formato mas aceita .png — usado pra confirmar que o fallback de
+// internal/imgfix (genérico, via worker.Pool) resolve isso pra qualquer
+// host, sem cada host precisar implementar a conversão por conta própria.
+type webpRejectingHost struct{ acceptedPaths []string }
+
+func (h *webpRejectingHost) Name() string { return "WebpRejectingHost" }
+
+func (h *webpRejectingHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
+	return "", nil
+}
+
+func (h *webpRejectingHost) UploadImage(ctx context.Context, path string) (models.UploadResult, error) {
+	h.acceptedPaths = append(h.acceptedPaths, path)
+	if strings.EqualFold(filepath.Ext(path), ".webp") {
+		return models.UploadResult{Success: false, Error: "tipo de arquivo invalido"}, fmt.Errorf("erro http 400: tipo de arquivo invalido")
+	}
+	return models.UploadResult{
+		URL:      "https://fake.test/" + filepath.Base(path),
+		Filename: filepath.Base(path),
+		Success:  true,
+	}, nil
+}
+
+// TestPool_FallbackWebpParaPNGQuandoHostRejeita reproduz o caso real do
+// ImgChest rejeitando um .webp estendido (VP8X) válido: o Pool deve cair
+// pro fallback de PNG (internal/imgfix) e completar o upload com sucesso,
+// preservando o nome de arquivo original no resultado.
+func TestPool_FallbackWebpParaPNGQuandoHostRejeita(t *testing.T) {
+	host := &webpRejectingHost{}
+	pool := worker.NewPool(host, 1, 0, 3) // até 3 tentativas, dá tempo do fallback entrar
+
+	images := []string{"../imgfix/testdata/extended-with-alpha.webp"}
+	results, err := pool.ProcessImages(context.Background(), images, nil, nil, false)
+	if err != nil {
+		t.Fatalf("ProcessImages retornou erro: %v", err)
+	}
+
+	if !results[0].Success {
+		t.Fatalf("esperava sucesso via fallback PNG, veio: %+v", results[0])
+	}
+	if results[0].Filename != "extended-with-alpha.webp" {
+		t.Errorf("esperava que o Filename final preservasse o nome original .webp, veio %q", results[0].Filename)
+	}
+
+	sawWebp, sawPng := false, false
+	for _, p := range host.acceptedPaths {
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".webp":
+			sawWebp = true
+		case ".png":
+			sawPng = true
+		}
+	}
+	if !sawWebp || !sawPng {
+		t.Errorf("esperava que o host visse uma tentativa .webp (rejeitada) e uma .png (aceita), paths=%v", host.acceptedPaths)
 	}
 }
