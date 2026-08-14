@@ -1,8 +1,10 @@
 package worker_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -173,5 +175,64 @@ func TestPool_FallbackWebpParaJPEGQuandoHostRejeita(t *testing.T) {
 	}
 	if !sawWebp || !sawJpeg {
 		t.Errorf("esperava que o host visse uma tentativa .webp (rejeitada) e uma .jpg (aceita), paths=%v", host.acceptedPaths)
+	}
+}
+
+// extendedWebpRejectingHost simula um host que rejeita especificamente o
+// container VP8X (mas aceita webp simples) — o caso real do ImgChest.
+// Confirma o caminho preferido: resolve só simplificando (imgfix.SimplifyWebP,
+// sem perda), sem nunca precisar cair no fallback JPEG com perdas.
+type extendedWebpRejectingHost struct{ acceptedPaths []string }
+
+func (h *extendedWebpRejectingHost) Name() string { return "ExtendedWebpRejectingHost" }
+
+func (h *extendedWebpRejectingHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
+	return "", nil
+}
+
+func (h *extendedWebpRejectingHost) UploadImage(ctx context.Context, path string) (models.UploadResult, error) {
+	h.acceptedPaths = append(h.acceptedPaths, path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return models.UploadResult{}, err
+	}
+	if bytes.Contains(data, []byte("VP8X")) {
+		return models.UploadResult{Success: false, Error: "tipo de arquivo invalido"}, fmt.Errorf("erro http 400: tipo de arquivo invalido")
+	}
+	return models.UploadResult{
+		URL:      "https://fake.test/" + filepath.Base(path),
+		Filename: filepath.Base(path),
+		Success:  true,
+	}, nil
+}
+
+// TestPool_SimplificaWebPSemPrecisarDeJPEG confirma o caminho preferido: um
+// host que só se importa com o container VP8X é resolvido pelo
+// SimplifyWebP (sem perda) já na 2a tentativa, nunca chegando no JPEG.
+func TestPool_SimplificaWebPSemPrecisarDeJPEG(t *testing.T) {
+	host := &extendedWebpRejectingHost{}
+	pool := worker.NewPool(host, 1, 0, 3)
+
+	images := []string{"../imgfix/testdata/extended-vp8l-no-alpha.webp"}
+	results, err := pool.ProcessImages(context.Background(), images, nil, nil, false)
+	if err != nil {
+		t.Fatalf("ProcessImages retornou erro: %v", err)
+	}
+
+	if !results[0].Success {
+		t.Fatalf("esperava sucesso via SimplifyWebP, veio: %+v", results[0])
+	}
+
+	sawJpeg := false
+	for _, p := range host.acceptedPaths {
+		if strings.EqualFold(filepath.Ext(p), ".jpg") {
+			sawJpeg = true
+		}
+	}
+	if sawJpeg {
+		t.Errorf("não deveria ter chegado no fallback JPEG, paths=%v", host.acceptedPaths)
+	}
+	if len(host.acceptedPaths) != 2 {
+		t.Errorf("esperava exatamente 2 tentativas (original rejeitado + simplificado aceito), veio %d: %v", len(host.acceptedPaths), host.acceptedPaths)
 	}
 }

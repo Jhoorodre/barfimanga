@@ -110,12 +110,19 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 					var uploadErr error
 
 					// uploadPath começa igual ao arquivo original; se um host
-					// rejeitar por formato e for .webp, cai pro fallback de
-					// JPEG (ver imgfix) — genérico, vale pra qualquer host,
-					// não só o que motivou isso (ImgChest rejeitando WebP
-					// estendido/VP8X mesmo sendo válido).
+					// rejeitar por formato e for .webp, tenta primeiro
+					// simplificar o container (imgfix.SimplifyWebP — sem
+					// perda, remove só VP8X/metadados) e só se isso não
+					// resolver cai pro fallback com perdas (NormalizeWebP,
+					// reconverte pra JPEG). Genérico, vale pra qualquer
+					// host — não só o que motivou isso (ImgChest rejeitando
+					// WebP estendido/VP8X mesmo sendo válido).
+					const (
+						webpStageOriginal = iota
+						webpStageDone
+					)
+					webpStage := webpStageOriginal
 					uploadPath := j.filepath
-					webpFallbackTried := false
 					var webpFallbackCleanup func()
 
 					// Retry logic agressivo para lidar com falhas de ActiveModel do backend Ruby (ImgBox)
@@ -126,12 +133,30 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 							break
 						}
 
-						if !webpFallbackTried && strings.EqualFold(filepath.Ext(uploadPath), ".webp") {
-							webpFallbackTried = true
+						if webpStage == webpStageOriginal && strings.EqualFold(filepath.Ext(uploadPath), ".webp") {
+							if newPath, cleanup, applicable, fixErr := imgfix.SimplifyWebP(uploadPath); fixErr == nil && applicable {
+								uploadPath = newPath
+								webpFallbackCleanup = cleanup
+								// deixa em webpStageOriginal: se essa versão
+								// simplificada (ainda .webp) falhar de novo,
+								// cai no ramo abaixo pro fallback com perdas.
+							} else if newPath, cleanup, fixErr := imgfix.NormalizeWebP(uploadPath); fixErr == nil {
+								uploadPath = newPath
+								webpFallbackCleanup = cleanup
+								webpStage = webpStageDone
+							} else {
+								webpStage = webpStageDone
+							}
+						} else if webpStage == webpStageOriginal {
+							// a versão simplificada (ainda .webp) também falhou
 							if newPath, cleanup, fixErr := imgfix.NormalizeWebP(uploadPath); fixErr == nil {
+								if webpFallbackCleanup != nil {
+									webpFallbackCleanup()
+								}
 								uploadPath = newPath
 								webpFallbackCleanup = cleanup
 							}
+							webpStage = webpStageDone
 						}
 
 						if attempt < p.maxRetries {
