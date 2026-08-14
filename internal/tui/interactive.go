@@ -18,6 +18,13 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// forceRebuildWarning explica o alcance real do Rebuild: não é "só reenvia o
+// que falhou" — reprocessa a obra INTEIRA (ignora checkpoint de capítulos
+// concluídos e o cache de imagens por hash) e sobe tudo de novo. Em hosts
+// sem exclusão automática (ex: ImgChest), os uploads antigos ficam órfãos
+// no provedor — não duplicam no reader.json, mas ocupam espaço/cota lá.
+const forceRebuildWarning = "ATENÇÃO: reenvia a obra INTEIRA (todos os capítulos, mesmo os já concluídos), ignorando cache e checkpoint. Uploads antigos não são apagados do host (podem ficar duplicados/órfãos lá, ex: ImgChest). Pra retomar um capítulo travado com outro host, troque o Default Host e rode SEM forçar."
+
 // UploadTask representa uma obra a ser processada pelo motor
 type UploadTask struct {
 	Directory    string
@@ -105,7 +112,7 @@ func RunInteractive(mCfg *config.MultiConfig) ([]UploadTask, error) {
 						Value(&githubFolder),
 					huh.NewConfirm().
 						Title("Forçar Re-upload (Rebuild)?").
-						Description("Ignora cache e arquivos de estado para enviar tudo novamente.").
+						Description(forceRebuildWarning).
 						Value(&forceRebuild),
 				),
 			)
@@ -204,6 +211,7 @@ func selectFromLibrary(mCfg *config.MultiConfig) (UploadTask, error) {
 				Value(new(bool)), // Apenas visual
 			huh.NewConfirm().
 				Title("Forçar Re-upload (Rebuild)?").
+				Description(forceRebuildWarning).
 				Value(&forceRebuild),
 		),
 	)
@@ -457,6 +465,7 @@ func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
 			huh.NewGroup(
 				huh.NewConfirm().
 					Title("Forçar Re-upload (Rebuild) em todas?").
+					Description(forceRebuildWarning).
 					Value(&forceRebuild),
 			),
 		)
