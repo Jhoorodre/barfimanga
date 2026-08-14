@@ -111,7 +111,7 @@ func (p *Pool) ProcessImages(ctx context.Context, images []string, tracker *prog
 
 					// uploadPath começa igual ao arquivo original; se um host
 					// rejeitar por formato e for .webp, cai pro fallback de
-					// PNG (ver imgfix) — genérico, vale pra qualquer host,
+					// JPEG (ver imgfix) — genérico, vale pra qualquer host,
 					// não só o que motivou isso (ImgChest rejeitando WebP
 					// estendido/VP8X mesmo sendo válido).
 					uploadPath := j.filepath

@@ -2,16 +2,16 @@ package imgfix
 
 import (
 	"bytes"
-	"image/png"
+	"image/jpeg"
 	"os"
 	"testing"
 )
 
-// TestNormalizeWebPDecodificaEstendidoEGeraPNGValido usa um .webp real no
+// TestNormalizeWebPDecodificaEstendidoEGeraJPEGValido usa um .webp real no
 // formato estendido (VP8X, com ICC profile embutido) — o mesmo formato que o
 // ImgChest rejeita mesmo sendo válido (ver worker.Pool) — e confirma que
-// vira um PNG decodificável, num arquivo novo que existe de verdade.
-func TestNormalizeWebPDecodificaEstendidoEGeraPNGValido(t *testing.T) {
+// vira um JPEG decodificável, num arquivo novo que existe de verdade.
+func TestNormalizeWebPDecodificaEstendidoEGeraJPEGValido(t *testing.T) {
 	newPath, cleanup, err := NormalizeWebP("testdata/extended-with-alpha.webp")
 	if err != nil {
 		t.Fatalf("NormalizeWebP retornou erro: %v", err)
@@ -22,8 +22,8 @@ func TestNormalizeWebPDecodificaEstendidoEGeraPNGValido(t *testing.T) {
 	if err != nil {
 		t.Fatalf("arquivo de saída não existe: %v", err)
 	}
-	if _, err := png.Decode(bytes.NewReader(data)); err != nil {
-		t.Fatalf("saída não é um PNG válido: %v", err)
+	if _, err := jpeg.Decode(bytes.NewReader(data)); err != nil {
+		t.Fatalf("saída não é um JPEG válido: %v", err)
 	}
 }
 

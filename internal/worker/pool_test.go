@@ -118,7 +118,7 @@ func TestPool_RateLimiting(t *testing.T) {
 }
 
 // webpRejectingHost simula um host (ex: ImgChest) que rejeita .webp por
-// formato mas aceita .png — usado pra confirmar que o fallback de
+// formato mas aceita .jpg — usado pra confirmar que o fallback de
 // internal/imgfix (genérico, via worker.Pool) resolve isso pra qualquer
 // host, sem cada host precisar implementar a conversão por conta própria.
 type webpRejectingHost struct{ acceptedPaths []string }
@@ -141,11 +141,11 @@ func (h *webpRejectingHost) UploadImage(ctx context.Context, path string) (model
 	}, nil
 }
 
-// TestPool_FallbackWebpParaPNGQuandoHostRejeita reproduz o caso real do
+// TestPool_FallbackWebpParaJPEGQuandoHostRejeita reproduz o caso real do
 // ImgChest rejeitando um .webp estendido (VP8X) válido: o Pool deve cair
-// pro fallback de PNG (internal/imgfix) e completar o upload com sucesso,
+// pro fallback de JPEG (internal/imgfix) e completar o upload com sucesso,
 // preservando o nome de arquivo original no resultado.
-func TestPool_FallbackWebpParaPNGQuandoHostRejeita(t *testing.T) {
+func TestPool_FallbackWebpParaJPEGQuandoHostRejeita(t *testing.T) {
 	host := &webpRejectingHost{}
 	pool := worker.NewPool(host, 1, 0, 3) // até 3 tentativas, dá tempo do fallback entrar
 
@@ -156,22 +156,22 @@ func TestPool_FallbackWebpParaPNGQuandoHostRejeita(t *testing.T) {
 	}
 
 	if !results[0].Success {
-		t.Fatalf("esperava sucesso via fallback PNG, veio: %+v", results[0])
+		t.Fatalf("esperava sucesso via fallback JPEG, veio: %+v", results[0])
 	}
 	if results[0].Filename != "extended-with-alpha.webp" {
 		t.Errorf("esperava que o Filename final preservasse o nome original .webp, veio %q", results[0].Filename)
 	}
 
-	sawWebp, sawPng := false, false
+	sawWebp, sawJpeg := false, false
 	for _, p := range host.acceptedPaths {
 		switch strings.ToLower(filepath.Ext(p)) {
 		case ".webp":
 			sawWebp = true
-		case ".png":
-			sawPng = true
+		case ".jpg":
+			sawJpeg = true
 		}
 	}
-	if !sawWebp || !sawPng {
-		t.Errorf("esperava que o host visse uma tentativa .webp (rejeitada) e uma .png (aceita), paths=%v", host.acceptedPaths)
+	if !sawWebp || !sawJpeg {
+		t.Errorf("esperava que o host visse uma tentativa .webp (rejeitada) e uma .jpg (aceita), paths=%v", host.acceptedPaths)
 	}
 }
