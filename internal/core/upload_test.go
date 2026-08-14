@@ -145,7 +145,7 @@ func TestRunProcessaPastaEArchiveNoMesmoLote(t *testing.T) {
 		client: github.NewClient(active), // GitHubToken vazio -> uploadToGitHub só avisa e retorna nil
 	}
 
-	err = p.Run(context.Background(), mangaRoot, true, "TestGroup", "obra_teste", "", true, false, config.MangaEntry{}, false)
+	err = p.Run(context.Background(), mangaRoot, true, "TestGroup", "obra_teste", "", true, false, config.MangaEntry{}, false, false, nil)
 	if err != nil {
 		t.Fatalf("Run retornou erro: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestRunAvisaImagemSoltaIgnoradaComArchiveNaRaiz(t *testing.T) {
 
 	active := config.Config{Workers: 1, MaxRetries: 1}
 	p := &Pipeline{active: active, host: fakeHost{}, client: github.NewClient(active)}
-	runErr := p.Run(context.Background(), root, true, "G", "obra", "", true, false, config.MangaEntry{}, false)
+	runErr := p.Run(context.Background(), root, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, nil)
 
 	w.Close()
 	os.Stderr = oldStderr
@@ -289,7 +289,7 @@ func TestRunCapituloParcialNaoFicaMarcadoComoCompletoEDepoisSeCompleta(t *testin
 	jsonPath := filepath.Join(mangaRoot, "obra.json")
 
 	// 1ª execução: bate na cota no meio do capítulo.
-	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false); err != nil {
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, nil); err != nil {
 		t.Fatalf("1ª execução: Run retornou erro: %v", err)
 	}
 	data, err := os.ReadFile(jsonPath)
@@ -307,7 +307,7 @@ func TestRunCapituloParcialNaoFicaMarcadoComoCompletoEDepoisSeCompleta(t *testin
 
 	// "Cota libera" — segunda execução deve completar a imagem que faltou.
 	host.remaining = 10
-	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false); err != nil {
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, nil); err != nil {
 		t.Fatalf("2ª execução: Run retornou erro: %v", err)
 	}
 	data, err = os.ReadFile(jsonPath)
@@ -373,7 +373,7 @@ func TestRunResumoDoLoteContaCapitulosEImagensCorretamente(t *testing.T) {
 		"Cap 003/02.jpg": true,
 	}}, client: github.NewClient(active)}
 
-	err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false)
+	err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, nil)
 	if err != nil {
 		t.Fatalf("Run retornou erro: %v", err)
 	}
@@ -412,4 +412,257 @@ func (h uniqueNameFailHost) UploadImage(ctx context.Context, path string) (model
 
 func (h uniqueNameFailHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
 	return "", nil
+}
+
+// countingHost conta quantas vezes UploadImage foi chamado por capítulo/arquivo
+// — usado pra provar se o cache de imagem foi ignorado (reenvio de verdade)
+// ou reaproveitado (cache hit, nem chama o host de novo).
+type countingHost struct {
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func newCountingHost() *countingHost {
+	return &countingHost{counts: make(map[string]int)}
+}
+
+func (h *countingHost) Name() string { return "counting" }
+
+func (h *countingHost) UploadImage(ctx context.Context, path string) (models.UploadResult, error) {
+	key := filepath.Base(filepath.Dir(path)) + "/" + filepath.Base(path)
+	h.mu.Lock()
+	h.counts[key]++
+	h.mu.Unlock()
+	return models.UploadResult{URL: "https://fake.test/" + key, Filename: key, Success: true}, nil
+}
+
+func (h *countingHost) CreateAlbum(ctx context.Context, title, description string, imageIDs []string) (string, error) {
+	return "", nil
+}
+
+func (h *countingHost) countFor(chapterDir, filename string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.counts[chapterDir+"/"+filename]
+}
+
+// TestRunForceChaptersReenviaApenasOsSelecionadosSemMexerNoResto reproduz o
+// caso real que motivou a feature: reenviar de verdade só um capítulo
+// específico (ex: preso num host antigo via cache), sem tocar no resto da
+// obra nem reprocessar o que já está correto.
+func TestRunForceChaptersReenviaApenasOsSelecionadosSemMexerNoResto(t *testing.T) {
+	mangaRoot := t.TempDir()
+	mk := func(chapter, filename, content string) {
+		dir := filepath.Join(mangaRoot, chapter)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("Cap 001", "01.jpg", "pagina1")
+	mk("Cap 002", "01.jpg", "pagina2")
+
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	active := config.Config{Workers: 1, MaxRetries: 1}
+	host := newCountingHost()
+	p := &Pipeline{active: active, host: host, client: github.NewClient(active)}
+
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, nil); err != nil {
+		t.Fatalf("1ª execução: %v", err)
+	}
+	if got := host.countFor("Cap 001", "01.jpg"); got != 1 {
+		t.Fatalf("esperava 1 upload de Cap 001/01.jpg na 1ª execução, veio %d", got)
+	}
+
+	jsonPath := filepath.Join(mangaRoot, "obra.json")
+	before, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(before), "fake.test/Cap 002/01.jpg") {
+		t.Fatalf("esperava Cap 002 no JSON antes da 2ª execução, veio:\n%s", before)
+	}
+
+	// 2ª execução: força só "Cap 001".
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, []string{"Cap 001"}); err != nil {
+		t.Fatalf("2ª execução: %v", err)
+	}
+
+	if got := host.countFor("Cap 001", "01.jpg"); got != 2 {
+		t.Fatalf("esperava reenvio de Cap 001/01.jpg (cache ignorado), contagem ficou em %d", got)
+	}
+	if got := host.countFor("Cap 002", "01.jpg"); got != 1 {
+		t.Fatalf("Cap 002 não deveria ter sido tocado (pulado via checkpoint), contagem ficou em %d", got)
+	}
+
+	after, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "fake.test/Cap 002/01.jpg") {
+		t.Fatalf("esperava Cap 002 preservado no JSON após a 2ª execução, veio:\n%s", after)
+	}
+}
+
+// TestRunForceReuploadGlobalIgnoraCacheDeImagem trava a correção do bug: até
+// aqui, "Forçar Re-upload" nunca ignorava de verdade o cache de imagem (um
+// `false` fixo no código sempre passava pro worker.Pool). Agora,
+// forceRebuild+forceReupload juntos devem reenviar mesmo imagem já cacheada.
+func TestRunForceReuploadGlobalIgnoraCacheDeImagem(t *testing.T) {
+	mangaRoot := t.TempDir()
+	dir := filepath.Join(mangaRoot, "Cap 001")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01.jpg"), []byte("pagina"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	active := config.Config{Workers: 1, MaxRetries: 1}
+	host := newCountingHost()
+	p := &Pipeline{active: active, host: host, client: github.NewClient(active)}
+
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, nil); err != nil {
+		t.Fatalf("1ª execução: %v", err)
+	}
+	if got := host.countFor("Cap 001", "01.jpg"); got != 1 {
+		t.Fatalf("esperava 1 upload na 1ª execução, veio %d", got)
+	}
+
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, true, config.MangaEntry{}, false, true, nil); err != nil {
+		t.Fatalf("2ª execução (forceRebuild+forceReupload): %v", err)
+	}
+	if got := host.countFor("Cap 001", "01.jpg"); got != 2 {
+		t.Fatalf("esperava reenvio de verdade com forceReupload=true, contagem ficou em %d", got)
+	}
+}
+
+// TestRunForceRebuildSemReuploadMantemComportamentoAtual garante que
+// forceRebuild=true sozinho (sem forceReupload) continua reaproveitando o
+// cache de imagem — só reconstrói checkpoint/JSON, sem regressão pro
+// comportamento que já existia.
+func TestRunForceRebuildSemReuploadMantemComportamentoAtual(t *testing.T) {
+	mangaRoot := t.TempDir()
+	dir := filepath.Join(mangaRoot, "Cap 001")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01.jpg"), []byte("pagina"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	active := config.Config{Workers: 1, MaxRetries: 1}
+	host := newCountingHost()
+	p := &Pipeline{active: active, host: host, client: github.NewClient(active)}
+
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, nil); err != nil {
+		t.Fatalf("1ª execução: %v", err)
+	}
+
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, true, config.MangaEntry{}, false, false, nil); err != nil {
+		t.Fatalf("2ª execução (forceRebuild sem forceReupload): %v", err)
+	}
+	if got := host.countFor("Cap 001", "01.jpg"); got != 1 {
+		t.Fatalf("esperava cache reaproveitado (sem forceReupload), contagem deveria continuar 1, veio %d", got)
+	}
+}
+
+// TestRunForceChaptersNomeInexistenteNaoQuebra garante que um nome digitado
+// errado (ou capítulo que não existe mais) na seleção não derruba o Run —
+// só não tem efeito nenhum, igual forceChapters=nil.
+func TestRunForceChaptersNomeInexistenteNaoQuebra(t *testing.T) {
+	mangaRoot := t.TempDir()
+	dir := filepath.Join(mangaRoot, "Cap 001")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "01.jpg"), []byte("pagina"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	active := config.Config{Workers: 1, MaxRetries: 1}
+	p := &Pipeline{active: active, host: fakeHost{}, client: github.NewClient(active)}
+
+	if err := p.Run(context.Background(), mangaRoot, true, "G", "obra", "", true, false, config.MangaEntry{}, false, false, []string{"não existe"}); err != nil {
+		t.Fatalf("Run não deveria falhar com capítulo inexistente na seleção: %v", err)
+	}
+}
+
+// TestListChaptersRetornaPastasEArquivosDeArchiveOrdenados cobre o helper
+// novo isoladamente: pastas e arquivos de archive juntos, ordenados
+// naturalmente, ignorando arquivos soltos que não são archive.
+func TestListChaptersRetornaPastasEArquivosDeArchiveOrdenados(t *testing.T) {
+	dir := t.TempDir()
+	for _, d := range []string{"Cap 002", "Cap 010"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Cap 001.cbz"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nota.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	chapters, err := ListChapters(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Cap 001.cbz", "Cap 002", "Cap 010"}
+	if len(chapters) != len(want) {
+		t.Fatalf("esperava %v, veio %v", want, chapters)
+	}
+	for i := range want {
+		if chapters[i] != want[i] {
+			t.Fatalf("esperava %v, veio %v", want, chapters)
+		}
+	}
+}
+
+// TestDuplicateChapterKeysDetectaColisaoRealEntrePastaAntigaEArchiveNovo
+// reproduz o caso real dessa obra: uma pasta antiga sem prefixo e um .cbz
+// novo com prefixo "Ch." mapeando pra mesma chave de capítulo.
+func TestDuplicateChapterKeysDetectaColisaoRealEntrePastaAntigaEArchiveNovo(t *testing.T) {
+	chapters := []string{
+		"65 - O Poço Oculto e a Luz da Lua (2)",
+		"Ch.065 - O Poço Oculto e a Luz da Lua (2).cbz",
+		"Ch.066 - Outra.cbz",
+	}
+	dupes := DuplicateChapterKeys(chapters)
+	if len(dupes) != 1 {
+		t.Fatalf("esperava 1 chave colidindo, veio %d: %v", len(dupes), dupes)
+	}
+	names, ok := dupes["065"]
+	if !ok {
+		t.Fatalf("esperava colisão na chave 065, veio %v", dupes)
+	}
+	if len(names) != 2 {
+		t.Fatalf("esperava 2 nomes colidindo em 065, veio %v", names)
+	}
 }

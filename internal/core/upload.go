@@ -105,6 +105,54 @@ func chapterNumberFromName(name string) (float64, bool) {
 	return n, err == nil
 }
 
+// ListChapters lista os nomes brutos de capítulo (pastas e arquivos de
+// archive .zip/.cbz/.rar/.cbr) na raiz de uma obra, ordenados naturalmente —
+// mesma varredura que Pipeline.Run usa internamente. Exportado pra TUI
+// oferecer rebuild seletivo por capítulo sem duplicar essa lógica.
+func ListChapters(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var chapters []string
+	for _, e := range entries {
+		if e.IsDir() {
+			chapters = append(chapters, e.Name())
+		} else if archive.IsArchive(e.Name()) {
+			// Arquivo .zip/.cbz/.rar/.cbr solto na raiz conta como capítulo,
+			// igual uma pasta — é extraído sob demanda no processamento.
+			chapters = append(chapters, e.Name())
+		}
+	}
+	utils.NaturalSort(chapters)
+	return chapters, nil
+}
+
+// DuplicateChapterKeys agrupa nomes brutos de capítulo pela mesma chave
+// normalizada (chapterKey) e devolve só os grupos com 2+ nomes — caso real:
+// uma pasta antiga ("65 - Título") e um .cbz novo ("Ch.065 - Título.cbz")
+// mapeiam pra mesma chave "065". Usado pra avisar antes de um rebuild
+// seletivo, já que escolher só um dos dois pode não bastar.
+func DuplicateChapterKeys(chapters []string) map[string][]string {
+	byKey := make(map[string][]string)
+	for _, c := range chapters {
+		chName := c // mesma lógica de processChapter: só arquivo de archive perde a extensão
+		if archive.IsArchive(c) {
+			chName = strings.TrimSuffix(c, filepath.Ext(c))
+		}
+		k := chapterKey(chName)
+		byKey[k] = append(byKey[k], c)
+	}
+	dupes := make(map[string][]string)
+	for k, names := range byKey {
+		if len(names) > 1 {
+			dupes[k] = names
+		}
+	}
+	return dupes
+}
+
 // formatChapterTitle monta o título canônico do capítulo.
 // Com volume: "Vol.02 Ch.006 - Compatível"
 // Sem volume (showVol=false ou volume=""): "Ch.006 - Compatível"
@@ -249,7 +297,12 @@ func NewPipeline(mCfg config.MultiConfig) (*Pipeline, error) {
 	}, nil
 }
 
-func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName string, mangaID string, ghFolder string, useRoot bool, forceRebuild bool, entry config.MangaEntry, syncOnly bool) error {
+func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName string, mangaID string, ghFolder string, useRoot bool, forceRebuild bool, entry config.MangaEntry, syncOnly bool, forceReupload bool, forceChapters []string) error {
+	forceChSet := make(map[string]bool, len(forceChapters))
+	for _, c := range forceChapters {
+		forceChSet[c] = true
+	}
+
 	if entry.ScanGroup != "" {
 		groupName = entry.ScanGroup
 	}
@@ -292,22 +345,12 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		if !quiet {
 			fmt.Printf(">> Analisando diretório: %s\n", dir)
 		}
-		entries, err := os.ReadDir(dir)
+		var err error
+		chapters, err = ListChapters(dir)
 		if err != nil {
 			return err
 		}
-
-		for _, e := range entries {
-			if e.IsDir() {
-				chapters = append(chapters, e.Name())
-				hasSubDirs = true
-			} else if archive.IsArchive(e.Name()) {
-				// Arquivo .zip/.cbz/.rar/.cbr solto na raiz conta como capítulo,
-				// igual uma pasta — é extraído sob demanda no processamento.
-				chapters = append(chapters, e.Name())
-				hasSubDirs = true
-			}
-		}
+		hasSubDirs = len(chapters) > 0
 
 		// [Auto-fill / Single Chapter Mode]
 		if !hasSubDirs {
@@ -467,8 +510,13 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 		progUI := progress.NewProgress(quiet)
 		progUI.Start(int64(len(images)), tracker)
 
-		// Rebuild reconstrói o JSON do zero mas ainda usa cache de imagens para evitar re-uploads
-		results, err := pool.ProcessImages(ctx, images, tracker, uploadCache, false)
+		// chapterForce ignora o cache de imagem por hash: no rebuild global só
+		// quando forceReupload=true (senão só reconstrói o JSON/checkpoint,
+		// reaproveitando upload já feito); num capítulo selecionado
+		// individualmente (forceChSet), sempre ignora — é o ponto de escolher
+		// ele especificamente.
+		chapterForce := (forceRebuild && forceReupload) || forceChSet[ch]
+		results, err := pool.ProcessImages(ctx, images, tracker, uploadCache, chapterForce)
 		progUI.Finish(err == nil)
 
 		if ctx.Err() != nil {
@@ -557,7 +605,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, quiet bool, groupName st
 	}
 
 	for _, ch := range chapters {
-		if state.CompletedChapters[ch] && !forceRebuild {
+		if state.CompletedChapters[ch] && !forceRebuild && !forceChSet[ch] {
 			if !quiet {
 				fmt.Printf("\n-> Capítulo: %s (Pulado via State Checkpoint)\n", ch)
 			}

@@ -21,23 +21,25 @@ import (
 // cliOptions mantém em memória todas as bandeiras (flags) passadas pelo terminal na hora de rodar o programa.
 // Ex: `barfimanga --force --sync-only` preenche esta estrutura.
 type cliOptions struct {
-	ConfigMode   string            // Exibe as configurações do usuário no terminal (ex: "show")
-	Interactive  bool              // Ativa a interface visual do TUI (Menu bonitinho)
-	Directory    string            // O caminho físico das pastas de imagens do mangá a ser upado
-	Workers      int               // Quantas imagens subir paralelamente (se 0, usa a configuração padrão)
-	Host         string            // Onde hospedar a imagem (ex: "imgbox", "catbox", "imgur")
-	Quiet        bool              // Se verdadeiro, esconde as barras de progresso (útil para automação via bash)
-	Recursive    bool              // Se verdadeiro, tentará procurar várias obras em sub-pastas (ainda não totalmente implementado)
-	Retry        int               // Quantas vezes tentar upar a mesma imagem se o host cair
-	Token        string            // API Key do serviço de hospedagem escolhido
-	RateLimit    float64           // Limite de requisições por segundo para evitar que o host dê ban por excesso de tráfego
-	Group        string            // A Scanlator associada ao upload (Aparece no JSON do site)
-	MangaID      string            // ID único que vai virar o nome do arquivo json final
-	GitHubFolder string            // Se o repo tiver mangás em pastas diferentes, especifica o local
-	UseRoot      bool              // Ignora subpastas e joga o arquivo index direto no repositório root
-	ForceRebuild bool              // [PERIGO] Se verdadeiro, ele deleta caches locais e sobe TODAS as imagens de novo, ignorando as que já deram sucesso
-	SyncOnly     bool              // Se verdadeiro, ele não mexe com imagens, APENAS empurra o arquivo JSON localizado atualizado pro Github
-	MangaEntry   config.MangaEntry // Objeto com todos os metadados (título, autor, descrição) capturado do TUI
+	ConfigMode    string            // Exibe as configurações do usuário no terminal (ex: "show")
+	Interactive   bool              // Ativa a interface visual do TUI (Menu bonitinho)
+	Directory     string            // O caminho físico das pastas de imagens do mangá a ser upado
+	Workers       int               // Quantas imagens subir paralelamente (se 0, usa a configuração padrão)
+	Host          string            // Onde hospedar a imagem (ex: "imgbox", "catbox", "imgur")
+	Quiet         bool              // Se verdadeiro, esconde as barras de progresso (útil para automação via bash)
+	Recursive     bool              // Se verdadeiro, tentará procurar várias obras em sub-pastas (ainda não totalmente implementado)
+	Retry         int               // Quantas vezes tentar upar a mesma imagem se o host cair
+	Token         string            // API Key do serviço de hospedagem escolhido
+	RateLimit     float64           // Limite de requisições por segundo para evitar que o host dê ban por excesso de tráfego
+	Group         string            // A Scanlator associada ao upload (Aparece no JSON do site)
+	MangaID       string            // ID único que vai virar o nome do arquivo json final
+	GitHubFolder  string            // Se o repo tiver mangás em pastas diferentes, especifica o local
+	UseRoot       bool              // Ignora subpastas e joga o arquivo index direto no repositório root
+	ForceRebuild  bool              // Reconstrói checkpoint/JSON do zero, mas reaproveita cache de imagem por hash (rápido, não reenvia o que já subiu)
+	ForceReupload bool              // [PERIGO] Combinado com ForceRebuild, ignora também o cache de imagem — reenvia TODAS de novo, gasta cota de host de verdade
+	ForceChapters []string          // Nomes brutos de capítulo (só via TUI) a forçar individualmente, ignorando checkpoint e cache só deles
+	SyncOnly      bool              // Se verdadeiro, ele não mexe com imagens, APENAS empurra o arquivo JSON localizado atualizado pro Github
+	MangaEntry    config.MangaEntry // Objeto com todos os metadados (título, autor, descrição) capturado do TUI
 }
 
 // parseFlags captura todas as opções digitadas no terminal e mapeia na struct cliOptions
@@ -68,7 +70,8 @@ func parseFlags(args []string) (*cliOptions, error) {
 
 	fs.BoolVar(&opts.UseRoot, "root", false, "Salvar o JSON na raiz (atalho para --ghpath '')")
 
-	fs.BoolVar(&opts.ForceRebuild, "force", false, "Força o re-upload, ignorando cache e checkpoints")
+	fs.BoolVar(&opts.ForceRebuild, "force", false, "Reconstrói checkpoint/JSON do zero (reaproveita cache de imagem por hash)")
+	fs.BoolVar(&opts.ForceReupload, "force-reupload", false, "Combinado com --force, ignora também o cache de imagem e reenvia tudo de novo")
 
 	fs.BoolVar(&opts.SyncOnly, "sync-only", false, "Atualiza apenas os metadados (JSON) no GitHub")
 
@@ -205,12 +208,13 @@ func main() {
 				return
 			}
 			tasks = []tui.UploadTask{{
-				Directory:    opts.Directory,
-				MangaID:      opts.MangaID,
-				GitHubFolder: opts.GitHubFolder,
-				ForceRebuild: opts.ForceRebuild,
-				SyncOnly:     opts.SyncOnly,
-				MangaEntry:   opts.MangaEntry,
+				Directory:     opts.Directory,
+				MangaID:       opts.MangaID,
+				GitHubFolder:  opts.GitHubFolder,
+				ForceRebuild:  opts.ForceRebuild,
+				ForceReupload: opts.ForceReupload,
+				SyncOnly:      opts.SyncOnly,
+				MangaEntry:    opts.MangaEntry,
 			}}
 		}
 
@@ -220,6 +224,8 @@ func main() {
 			opts.MangaID = task.MangaID
 			opts.GitHubFolder = task.GitHubFolder
 			opts.ForceRebuild = task.ForceRebuild
+			opts.ForceReupload = task.ForceReupload
+			opts.ForceChapters = task.ForceChapters
 			opts.SyncOnly = task.SyncOnly
 			opts.MangaEntry = task.MangaEntry
 			if task.GitHubFolder == "" {
@@ -247,7 +253,7 @@ func main() {
 				if err != nil {
 					return fmt.Errorf("erro ao configurar pipeline: %v", err)
 				}
-				return pipeline.Run(ctx, opts.Directory, opts.Quiet, groupName, opts.MangaID, opts.GitHubFolder, opts.UseRoot, opts.ForceRebuild, opts.MangaEntry, opts.SyncOnly)
+				return pipeline.Run(ctx, opts.Directory, opts.Quiet, groupName, opts.MangaID, opts.GitHubFolder, opts.UseRoot, opts.ForceRebuild, opts.MangaEntry, opts.SyncOnly, opts.ForceReupload, opts.ForceChapters)
 			}()
 
 			// Verifica cancelamento ANTES de chamar stop(), pois stop() cancela o contexto

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"barfimanga/internal/config"
+	"barfimanga/internal/core"
 	"barfimanga/internal/utils"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -18,21 +19,24 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// forceRebuildWarning explica o alcance real do Rebuild: não é "só reenvia o
-// que falhou" — reprocessa a obra INTEIRA (ignora checkpoint de capítulos
-// concluídos e o cache de imagens por hash) e sobe tudo de novo. Em hosts
-// sem exclusão automática (ex: ImgChest), os uploads antigos ficam órfãos
-// no provedor — não duplicam no reader.json, mas ocupam espaço/cota lá.
-const forceRebuildWarning = "ATENÇÃO: reenvia a obra INTEIRA (todos os capítulos, mesmo os já concluídos), ignorando cache e checkpoint. Uploads antigos não são apagados do host (podem ficar duplicados/órfãos lá, ex: ImgChest). Pra retomar um capítulo travado com outro host, troque o Default Host e rode SEM forçar."
+// forceRebuildWarning explica o alcance real do "reconstruir índice": não é
+// "só reenvia o que falhou" — reprocessa a obra INTEIRA (ignora checkpoint de
+// capítulos concluídos e reconstrói o mapa de capítulos do JSON do zero), mas
+// REAPROVEITA o cache de imagem por hash — não reenvia de verdade nenhuma
+// imagem já enviada antes. Pra forçar reenvio de verdade (ignorando cache),
+// use "reenviar tudo de verdade" ou selecione capítulos específicos.
+const forceRebuildWarning = "Reconstrói o checkpoint e o índice de capítulos do JSON do zero (útil se o JSON ficou com entradas erradas/duplicadas), mas REAPROVEITA imagens já enviadas via cache — não gasta cota nova de upload. Não resolve capítulo preso em host antigo (pra isso, use \"reenviar tudo de verdade\" ou selecione capítulos específicos)."
 
 // UploadTask representa uma obra a ser processada pelo motor
 type UploadTask struct {
-	Directory    string
-	MangaID      string
-	GitHubFolder string
-	ForceRebuild bool
-	SyncOnly     bool
-	MangaEntry   config.MangaEntry
+	Directory     string
+	MangaID       string
+	GitHubFolder  string
+	ForceRebuild  bool
+	ForceReupload bool
+	ForceChapters []string
+	SyncOnly      bool
+	MangaEntry    config.MangaEntry
 }
 
 // RunInteractive inicia a interface de usuário no terminal (TUI).
@@ -202,17 +206,25 @@ func selectFromLibrary(mCfg *config.MultiConfig) (UploadTask, error) {
 		}, nil
 	}
 
-	var forceRebuild bool
+	translatedDir := utils.ToWSLPath(entry.LocalPath)
+
+	var rebuildMode string
 	confirmForm := huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title(fmt.Sprintf("Iniciar Upload de '%s'?", entry.Name)).
 				Description("Caminho: "+entry.LocalPath).
 				Value(new(bool)), // Apenas visual
-			huh.NewConfirm().
+			huh.NewSelect[string]().
 				Title("Forçar Re-upload (Rebuild)?").
-				Description(forceRebuildWarning).
-				Value(&forceRebuild),
+				Description("Não: roda normal (pula o que já tá completo). Reconstruir índice: reseta checkpoint/JSON mas reaproveita cache de imagem (rápido, não gasta cota). Reenviar tudo: também ignora o cache, reenvia de verdade (lento, gasta cota). Capítulos específicos: escolhe só alguns pra reenviar, sem tocar no resto.").
+				Options(
+					huh.NewOption("Não", "no"),
+					huh.NewOption("Sim, reconstruir índice", "rebuild"),
+					huh.NewOption("Sim, reenviar tudo de verdade (ignora cache)", "reupload"),
+					huh.NewOption("Selecionar capítulos específicos", "select"),
+				).
+				Value(&rebuildMode),
 		),
 	)
 
@@ -220,14 +232,53 @@ func selectFromLibrary(mCfg *config.MultiConfig) (UploadTask, error) {
 		return UploadTask{}, nil
 	}
 
-	return UploadTask{
-		Directory:    utils.ToWSLPath(entry.LocalPath),
+	task := UploadTask{
+		Directory:    translatedDir,
 		MangaID:      entry.MangaID,
 		GitHubFolder: entry.GitHubFolder,
-		ForceRebuild: forceRebuild,
 		SyncOnly:     false,
 		MangaEntry:   entry,
-	}, nil
+	}
+
+	switch rebuildMode {
+	case "rebuild":
+		task.ForceRebuild = true
+	case "reupload":
+		task.ForceRebuild = true
+		task.ForceReupload = true
+	case "select":
+		chapters, err := core.ListChapters(translatedDir)
+		if err != nil || len(chapters) == 0 {
+			fmt.Printf("\n[!] Não foi possível listar capítulos (%v) — nenhum será forçado.\n", err)
+			break
+		}
+		if dupes := core.DuplicateChapterKeys(chapters); len(dupes) > 0 {
+			fmt.Println("\n[!] Aviso: nomes diferentes mapeiam pro mesmo capítulo no JSON — selecionar só um pode não bastar:")
+			for key, names := range dupes {
+				fmt.Printf("    capítulo %s: %v\n", key, names)
+			}
+		}
+		var chapterOptions []huh.Option[string]
+		for _, c := range chapters {
+			chapterOptions = append(chapterOptions, huh.NewOption(c, c))
+		}
+		var selected []string
+		chapterForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewMultiSelect[string]().
+					Title("Selecionar capítulos pra forçar reenvio (ignora cache só deles)").
+					Options(chapterOptions...).
+					Filterable(true).
+					Value(&selected),
+			),
+		)
+		if err := chapterForm.Run(); err != nil {
+			return UploadTask{}, nil
+		}
+		task.ForceChapters = selected
+	}
+
+	return task, nil
 }
 
 func selectBatchFromLibrary(mCfg *config.MultiConfig) ([]UploadTask, error) {
