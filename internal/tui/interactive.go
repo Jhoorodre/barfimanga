@@ -217,12 +217,11 @@ func selectFromLibrary(mCfg *config.MultiConfig) (UploadTask, error) {
 				Value(new(bool)), // Apenas visual
 			huh.NewSelect[string]().
 				Title("Forçar Re-upload (Rebuild)?").
-				Description("Não: roda normal (pula o que já tá completo). Reconstruir índice: reseta checkpoint/JSON mas reaproveita cache de imagem (rápido, não gasta cota). Reenviar tudo: também ignora o cache, reenvia de verdade (lento, gasta cota). Capítulos específicos: escolhe só alguns pra reenviar, sem tocar no resto.").
 				Options(
-					huh.NewOption("Não", "no"),
-					huh.NewOption("Sim, reconstruir índice", "rebuild"),
-					huh.NewOption("Sim, reenviar tudo de verdade (ignora cache)", "reupload"),
-					huh.NewOption("Selecionar capítulos específicos", "select"),
+					huh.NewOption("Não\n   Roda normal, pula o que já tá completo.", "no"),
+					huh.NewOption("Sim, reconstruir índice\n   Reseta checkpoint/JSON, mas reaproveita cache de imagem (rápido, sem gastar cota nova).", "rebuild"),
+					huh.NewOption("Sim, reenviar tudo de verdade\n   Ignora o cache também — reenvia toda imagem de novo (mais lento, gasta cota do host).", "reupload"),
+					huh.NewOption("Selecionar capítulos específicos\n   Escolhe só alguns capítulos pra reenviar, sem tocar no resto da obra.", "select"),
 				).
 				Value(&rebuildMode),
 		),
